@@ -1,0 +1,9 @@
+Package: com.example.mytweak
+Name: MyTweak
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: An example tweak compiled via GitHub Actions
+Maintainer: Your Name
+Author: Your Name
+Section: Tweaks
+Depends: mobilesubstrate
