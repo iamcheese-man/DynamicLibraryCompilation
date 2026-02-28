@@ -1,0 +1,133 @@
+name: Compile Dynamic Library
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_type:
+        description: 'Project Type'
+        required: true
+        type: choice
+        options:
+          - swift-dylib
+          - objc-dylib
+          - theos-tweak
+          - framework
+      output_format:
+        description: 'Output Format'
+        required: true
+        type: choice
+        options:
+          - dylib-only
+          - deb-only
+          - both
+
+jobs:
+  compile:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Show Xcode version
+        run: xcodebuild -version
+      
+      - name: Install Theos (if needed)
+        if: inputs.project_type == 'theos-tweak'
+        run: |
+          export THEOS=~/theos
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+          curl -LO https://github.com/theos/sdks/archive/master.zip
+          unzip master.zip -d $THEOS/sdks
+          mv $THEOS/sdks/sdks-master/* $THEOS/sdks/
+          rm -rf $THEOS/sdks/sdks-master master.zip
+      
+      - name: Compile Swift Dylib
+        if: inputs.project_type == 'swift-dylib'
+        run: |
+          cd src
+          swiftc -emit-library -o liboutput.dylib *.swift \
+            -target arm64-apple-ios14.0 \
+            -sdk $(xcrun --sdk iphoneos --show-sdk-path)
+          mkdir -p ../build
+          mv liboutput.dylib ../build/
+      
+      - name: Compile Objective-C Dylib
+        if: inputs.project_type == 'objc-dylib'
+        run: |
+          cd src
+          clang -dynamiclib -o liboutput.dylib *.m *.c \
+            -arch arm64 \
+            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -mios-version-min=14.0 \
+            -framework Foundation \
+            -framework UIKit
+          mkdir -p ../build
+          mv liboutput.dylib ../build/
+      
+      - name: Compile Theos Tweak
+        if: inputs.project_type == 'theos-tweak'
+        run: |
+          export THEOS=~/theos
+          cd src
+          make package
+          mkdir -p ../build
+          cp packages/*.deb ../build/
+      
+      - name: Compile Framework
+        if: inputs.project_type == 'framework'
+        run: |
+          cd src
+          xcodebuild -scheme MyFramework \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath ../build \
+            build
+          mkdir -p ../build/frameworks
+          cp -R ../build/Build/Products/Release-iphoneos/*.framework ../build/frameworks/
+      
+      - name: Create DEB package
+        if: inputs.output_format == 'deb-only' || inputs.output_format == 'both'
+        run: |
+          mkdir -p deb-package/DEBIAN
+          mkdir -p deb-package/Library/MobileSubstrate/DynamicLibraries
+          
+          cat > deb-package/DEBIAN/control << EOF
+          Package: com.example.dylib
+          Name: Compiled Dylib
+          Version: 1.0.0
+          Architecture: iphoneos-arm64
+          Description: Compiled dynamic library
+          Maintainer: GitHub Actions
+          Author: User
+          Section: Tweaks
+          EOF
+          
+          if [ -f build/liboutput.dylib ]; then
+            cp build/liboutput.dylib deb-package/Library/MobileSubstrate/DynamicLibraries/
+          fi
+          
+          dpkg-deb -Zxz -b deb-package output.deb
+          mkdir -p build
+          mv output.deb build/
+      
+      - name: Upload Dylib
+        if: inputs.output_format == 'dylib-only' || inputs.output_format == 'both'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-dylib
+          path: build/*.dylib
+      
+      - name: Upload DEB
+        if: inputs.output_format == 'deb-only' || inputs.output_format == 'both'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-deb
+          path: build/*.deb
+      
+      - name: Upload Framework
+        if: inputs.project_type == 'framework'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-framework
+          path: build/frameworks/*.framework
