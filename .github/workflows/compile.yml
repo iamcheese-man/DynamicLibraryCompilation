@@ -65,11 +65,27 @@ jobs:
           mkdir -p ../build
           mv liboutput.dylib ../build/
       
-      - name: Sign Dylib
+      - name: Sign Dylib with Entitlements
         if: inputs.project_type == 'swift-dylib' || inputs.project_type == 'objc-dylib'
         run: |
           cd build
-          codesign -s - -f liboutput.dylib
+          
+          cat > entitlements.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>get-task-allow</key>
+              <true/>
+              <key>dynamic-codesigning</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+          
+          codesign --force --sign - --entitlements entitlements.plist --timestamp=none liboutput.dylib
+          
+          codesign -dv liboutput.dylib
       
       - name: Compile Theos Tweak
         if: inputs.project_type == 'theos-tweak'
