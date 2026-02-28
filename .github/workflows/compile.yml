@@ -65,27 +65,18 @@ jobs:
           mkdir -p ../build
           mv liboutput.dylib ../build/
       
-      - name: Sign Dylib with Entitlements
+      - name: Install ldid
+        if: inputs.project_type == 'swift-dylib' || inputs.project_type == 'objc-dylib'
+        run: |
+          curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_macosx_x86_64
+          chmod +x ldid_macosx_x86_64
+          sudo mv ldid_macosx_x86_64 /usr/local/bin/ldid
+      
+      - name: Sign Dylib with ldid
         if: inputs.project_type == 'swift-dylib' || inputs.project_type == 'objc-dylib'
         run: |
           cd build
-          
-          cat > entitlements.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>get-task-allow</key>
-              <true/>
-              <key>dynamic-codesigning</key>
-              <true/>
-          </dict>
-          </plist>
-          EOF
-          
-          codesign --force --sign - --entitlements entitlements.plist --timestamp=none liboutput.dylib
-          
-          codesign -dv liboutput.dylib
+          ldid -S liboutput.dylib
       
       - name: Compile Theos Tweak
         if: inputs.project_type == 'theos-tweak'
