@@ -65,6 +65,12 @@ jobs:
           mkdir -p ../build
           mv liboutput.dylib ../build/
       
+      - name: Sign Dylib
+        if: inputs.project_type == 'swift-dylib' || inputs.project_type == 'objc-dylib'
+        run: |
+          cd build
+          codesign -s - -f liboutput.dylib
+      
       - name: Compile Theos Tweak
         if: inputs.project_type == 'theos-tweak'
         run: |
