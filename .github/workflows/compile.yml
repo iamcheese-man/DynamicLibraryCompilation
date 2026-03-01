@@ -60,7 +60,7 @@ jobs:
           M_FILES=$(find . -name "*.m" -type f)
           C_FILES=$(find . -name "*.c" -type f)
           
-          clang -dynamiclib -o liboutput.dylib \
+          clang -dynamiclib -fobjc-arc -o liboutput.dylib \
             $M_FILES $C_FILES \
             -arch arm64 \
             -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
