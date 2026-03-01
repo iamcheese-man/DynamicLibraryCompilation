@@ -1,94 +1,77 @@
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
-#import <objc/message.h>
 #import <AVFoundation/AVFoundation.h>
+#import <objc/runtime.h>
 
-static AVAudioPlayer *audioPlayer;
+static AVPlayer *globalPlayer = nil;
 
-#pragma mark - Button Action
+@interface TweakLoader : NSObject
+@end
 
-void tweakButtonTapped(id self, SEL _cmd) {
-    NSString *path = [[NSBundle mainBundle] pathForResource:@"sound" ofType:@"wav"];
-    if (!path) {
-        NSLog(@"[Tweak] sound.wav not found in bundle");
-        return;
-    }
+@implementation TweakLoader
 
-    NSURL *url = [NSURL fileURLWithPath:path];
-    NSError *error = nil;
-
-    audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:&error];
-    if (error) {
-        NSLog(@"[Tweak] Audio error: %@", error);
-        return;
-    }
-
-    [audioPlayer prepareToPlay];
-    [audioPlayer play];
-
-    NSLog(@"[Tweak] Sound played!");
++ (void)load {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(appDidFinishLaunching)
+                                                     name:UIApplicationDidFinishLaunchingNotification
+                                                   object:nil];
+    });
 }
 
-#pragma mark - Swizzled viewDidAppear
++ (void)appDidFinishLaunching {
 
-void swizzled_viewDidAppear(id self, SEL _cmd, BOOL animated) {
+    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+    if (!keyWindow) {
+        keyWindow = [UIApplication sharedApplication].windows.firstObject;
+    }
 
-    // Call original
-    ((void (*)(id, SEL, BOOL))objc_msgSend)(self, @selector(original_viewDidAppear:), animated);
-
-    UIViewController *vc = (UIViewController *)self;
-
-    // Prevent duplicate button
-    if ([vc.view viewWithTag:9999]) return;
+    if (!keyWindow) {
+        NSLog(@"[Tweak] No window found.");
+        return;
+    }
 
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    button.tag = 9999;
-    [button setTitle:@"Play Sound 🔊" forState:UIControlStateNormal];
-    button.backgroundColor = [UIColor systemBlueColor];
+    button.frame = CGRectMake(40, 120, 140, 50);
+    button.backgroundColor = [UIColor colorWithRed:0 green:0.5 blue:1 alpha:0.9];
+    button.layer.cornerRadius = 12;
+    [button setTitle:@"Play Sound" forState:UIControlStateNormal];
     [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    button.layer.cornerRadius = 10;
-    button.translatesAutoresizingMaskIntoConstraints = NO;
 
-    [button addTarget:vc action:@selector(tweakButtonTapped) forControlEvents:UIControlEventTouchUpInside];
+    [button addTarget:self
+               action:@selector(buttonTapped)
+     forControlEvents:UIControlEventTouchUpInside];
 
-    [vc.view addSubview:button];
+    [keyWindow addSubview:button];
 
-    [NSLayoutConstraint activateConstraints:@[
-        [button.centerXAnchor constraintEqualToAnchor:vc.view.centerXAnchor],
-        [button.bottomAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.bottomAnchor constant:-40],
-        [button.widthAnchor constraintEqualToConstant:160],
-        [button.heightAnchor constraintEqualToConstant:50]
-    ]];
+    NSLog(@"[Tweak] Button injected successfully.");
 }
 
-#pragma mark - Constructor
++ (void)buttonTapped {
 
-__attribute__((constructor))
-static void initialize() {
+    dispatch_async(dispatch_get_main_queue(), ^{
 
-    NSLog(@"[Tweak] Sound tweak loading...");
+        NSURL *url = [NSURL URLWithString:@"https://www.soundjay.com/buttons/sounds/button-3.mp3"];
 
-    // Add button action method
-    class_addMethod([UIViewController class],
-                    @selector(tweakButtonTapped),
-                    (IMP)tweakButtonTapped,
-                    "v@:");
+        if (!url) {
+            NSLog(@"[Tweak] Invalid URL.");
+            return;
+        }
 
-    // Get original method
-    Method originalMethod =
-    class_getInstanceMethod([UIViewController class], @selector(viewDidAppear:));
+        NSError *error = nil;
 
-    // Save original implementation
-    class_addMethod([UIViewController class],
-                    @selector(original_viewDidAppear:),
-                    method_getImplementation(originalMethod),
-                    method_getTypeEncoding(originalMethod));
+        // Force audio session (fixes silent playback in some apps)
+        [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:&error];
+        [[AVAudioSession sharedInstance] setActive:YES error:&error];
 
-    // Replace with our version
-    class_replaceMethod([UIViewController class],
-                        @selector(viewDidAppear:),
-                        (IMP)swizzled_viewDidAppear,
-                        method_getTypeEncoding(originalMethod));
+        if (error) {
+            NSLog(@"[Tweak] Audio session error: %@", error);
+        }
 
-    NSLog(@"[Tweak] Sound tweak loaded!");
+        globalPlayer = [AVPlayer playerWithURL:url];
+        [globalPlayer play];
+
+        NSLog(@"[Tweak] Streaming sound...");
+    });
 }
+
+@end
