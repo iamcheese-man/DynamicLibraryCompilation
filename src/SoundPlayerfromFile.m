@@ -11,18 +11,24 @@
 
 @implementation SoundPlayerFromFile
 
+// Replace the playSoundFromFile method with this version that shows alerts:
+
 - (void)playSoundFromFile {
-    // Get LiveContainer's main directory
     NSString *lcMainPath = [NSHomeDirectory() stringByDeletingLastPathComponent];
-    
-    // Build path to your audio file
     NSString *audioPath = [lcMainPath stringByAppendingPathComponent:@"PRIVATEUSERFOLDER/60Parsecs-2.mp3"];
-    
-    NSLog(@"[SoundPlayer] Looking for audio at: %@", audioPath);
     
     // Check if file exists
     if (![[NSFileManager defaultManager] fileExistsAtPath:audioPath]) {
-        NSLog(@"[SoundPlayer] ❌ File not found!");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIWindow *keyWindow = [UIApplication sharedApplication].windows.firstObject;
+            UIViewController *rootVC = keyWindow.rootViewController;
+            
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Error"
+                                                                           message:[NSString stringWithFormat:@"File not found at:\n%@", audioPath]
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [rootVC presentViewController:alert animated:YES completion:nil];
+        });
         return;
     }
     
@@ -38,7 +44,14 @@
         self.audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:audioURL error:&playerError];
         
         if (playerError) {
-            NSLog(@"[SoundPlayer] ❌ Player error: %@", playerError.localizedDescription);
+            UIWindow *keyWindow = [UIApplication sharedApplication].windows.firstObject;
+            UIViewController *rootVC = keyWindow.rootViewController;
+            
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Player Error"
+                                                                           message:playerError.localizedDescription
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [rootVC presentViewController:alert animated:YES completion:nil];
             return;
         }
         
@@ -47,13 +60,19 @@
         
         BOOL success = [self.audioPlayer play];
         
-        if (success) {
-            NSLog(@"[SoundPlayer] ✅ Playing audio (duration: %.2f seconds)", self.audioPlayer.duration);
-        } else {
-            NSLog(@"[SoundPlayer] ❌ Failed to play audio");
+        if (!success) {
+            UIWindow *keyWindow = [UIApplication sharedApplication].windows.firstObject;
+            UIViewController *rootVC = keyWindow.rootViewController;
+            
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Playback Failed"
+                                                                           message:@"Could not start audio playback"
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [rootVC presentViewController:alert animated:YES completion:nil];
         }
     });
 }
+
 
 - (void)playButtonTapped {
     NSLog(@"[SoundPlayer] Button tapped!");
