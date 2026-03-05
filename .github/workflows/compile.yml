@@ -67,7 +67,7 @@ jobs:
             -mios-version-min=14.0 \
             -framework Foundation \
             -framework UIKit \
-            -framework AVFoundation
+            -framework AVFoundation \
             -framework CoreGraphics
           
           mkdir -p ../build
