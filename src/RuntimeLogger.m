@@ -110,6 +110,10 @@ static void runDump(void) {
     addLog(@"==== DUMP COMPLETE ====");
 }
 
+// âââââââââââââââââââââââââââââââââââââââââââââ
+// HUD Panel ViewController
+// âââââââââââââââââââââââââââââââââââââââââââââ
+
 @interface HUDPanelViewController : UIViewController
     <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
 @property (nonatomic, strong) UITableView *tableView;
@@ -138,10 +142,10 @@ static void runDump(void) {
     title.font      = [UIFont boldSystemFontOfSize:15];
     [titleBar addSubview:title];
 
-    self.countLabel               = [[UILabel alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 80, 0, 70, 44)];
-    self.countLabel.textColor     = [UIColor colorWithWhite:1 alpha:0.7];
-    self.countLabel.font          = [UIFont systemFontOfSize:11];
-    self.countLabel.textAlignment = NSTextAlignmentRight;
+    self.countLabel                  = [[UILabel alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 80, 0, 70, 44)];
+    self.countLabel.textColor        = [UIColor colorWithWhite:1 alpha:0.7];
+    self.countLabel.font             = [UIFont systemFontOfSize:11];
+    self.countLabel.textAlignment    = NSTextAlignmentRight;
     self.countLabel.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     [titleBar addSubview:self.countLabel];
 
@@ -190,7 +194,9 @@ static void runDump(void) {
                               atScrollPosition:UITableViewScrollPositionBottom animated:NO];
 }
 
-- (void)updateCount { self.countLabel.text = [NSString stringWithFormat:@"%lu lines", (unsigned long)gFilteredLines.count]; }
+- (void)updateCount {
+    self.countLabel.text = [NSString stringWithFormat:@"%lu lines", (unsigned long)gFilteredLines.count];
+}
 
 - (void)dumpTapped {
     addLog(@"Starting dump...");
@@ -248,15 +254,34 @@ static void runDump(void) {
 
 @end
 
+// âââââââââââââââââââââââââââââââââââââââââââââ
+// Windows
+// âââââââââââââââââââââââââââââââââââââââââââââ
+
+// Floating button window â only intercepts its own 56x56 area
 @interface HUDWindow : UIWindow
 @end
 @implementation HUDWindow
-- (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e { return YES; }
+- (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e {
+    return CGRectContainsPoint(self.bounds, p);
+}
 @end
 
-static HUDWindow *gHUDWindow;
-static UIWindow  *gPanelWindow;
-static BOOL       gPanelVisible = NO;
+// Panel window â passes through touches that don't hit real subviews
+@interface HUDPanelWindow : UIWindow
+@end
+@implementation HUDPanelWindow
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hit = [super hitTest:point withEvent:event];
+    // If the hit view is the root VC's plain background, pass through to game
+    if (hit == self.rootViewController.view) return nil;
+    return hit;
+}
+@end
+
+static HUDWindow     *gHUDWindow;
+static HUDPanelWindow *gPanelWindow;
+static BOOL           gPanelVisible = NO;
 
 static UIWindowScene *activeScene(void) {
     for (UIScene *s in UIApplication.sharedApplication.connectedScenes)
@@ -269,7 +294,7 @@ static void showPanel(void) {
         CGRect  screen = UIScreen.mainScreen.bounds;
         CGFloat w = MIN(screen.size.width - 20, 420);
         CGFloat h = screen.size.height * 0.7;
-        gPanelWindow                    = [[UIWindow alloc] initWithWindowScene:activeScene()];
+        gPanelWindow                    = [[HUDPanelWindow alloc] initWithWindowScene:activeScene()];
         gPanelWindow.windowLevel        = UIWindowLevelAlert + 1;
         gPanelWindow.backgroundColor    = UIColor.clearColor;
         gPanelWindow.frame              = CGRectMake((screen.size.width - w) / 2, screen.size.height * 0.15, w, h);
@@ -277,7 +302,17 @@ static void showPanel(void) {
     }
     gPanelVisible       = !gPanelVisible;
     gPanelWindow.hidden = !gPanelVisible;
-    if (gPanelVisible) [gPanelWindow makeKeyAndVisible];
+    if (gPanelVisible) {
+        [gPanelWindow makeKeyAndVisible];
+    } else {
+        // Return key window to the game
+        for (UIWindow *w in UIApplication.sharedApplication.windows) {
+            if (w != gPanelWindow && w != gHUDWindow) {
+                [w makeKeyWindow];
+                break;
+            }
+        }
+    }
 }
 
 static void createFloatingButton(void) {
@@ -325,7 +360,7 @@ static void createFloatingButton(void) {
     frame.origin.x   = MAX(0, MIN(frame.origin.x + delta.x, screen.size.width  - frame.size.width));
     frame.origin.y   = MAX(0, MIN(frame.origin.y + delta.y, screen.size.height - frame.size.height));
     gHUDWindow.frame = frame;
-    [pan setTranslation:CGPointZero inView:nil];
+    [pan setTranslation:CGPointMake(0, 0) inView:nil];
 }
 @end
 
