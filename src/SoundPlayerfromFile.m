@@ -14,8 +14,8 @@
 // Replace the playSoundFromFile method with this version that shows alerts:
 
 - (void)playSoundFromFile {
-    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *audioPath = [documents stringByAppendingPathComponent:@"PRIVATEUSERFOLDER/60Parsecs-2.mp3"];
+    NSString *sharedFolder = [NSString stringWithUTF8String:getenv("LC_SHARED_FOLDER")];
+    NSString *audioPath = [sharedFolder stringByAppendingPathComponent:@"60Parsecs-2.mp3"];
     
     // Check if file exists
     if (![[NSFileManager defaultManager] fileExistsAtPath:audioPath]) {
