@@ -68,6 +68,7 @@ jobs:
             -framework Foundation \
             -framework UIKit \
             -framework AVFoundation
+            -framework CoreGraphics
           
           mkdir -p ../build
           mv liboutput.dylib ../build/
