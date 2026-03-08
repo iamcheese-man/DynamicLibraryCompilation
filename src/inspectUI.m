@@ -31,7 +31,7 @@
     self.floatingButton.layer.shadowOpacity = 0.3;
     self.floatingButton.layer.shadowRadius = 4;
     
-    [self.floatingButton setTitle:@"🔍" forState:UIControlStateNormal];
+    [self.floatingButton setTitle:@"ð" forState:UIControlStateNormal];
     self.floatingButton.titleLabel.font = [UIFont systemFontOfSize:30];
     
     [self.floatingButton addTarget:self action:@selector(toggleInspector) forControlEvents:UIControlEventTouchUpInside];
@@ -67,7 +67,7 @@
 
 - (void)startInspecting {
     self.isInspecting = YES;
-    [self.floatingButton setTitle:@"❌" forState:UIControlStateNormal];
+    [self.floatingButton setTitle:@"â" forState:UIControlStateNormal];
     self.floatingButton.backgroundColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:0.9];
     
     // Enable tap gesture on window to inspect views
@@ -78,7 +78,7 @@
 
 - (void)stopInspecting {
     self.isInspecting = NO;
-    [self.floatingButton setTitle:@"🔍" forState:UIControlStateNormal];
+    [self.floatingButton setTitle:@"ð" forState:UIControlStateNormal];
     self.floatingButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:0.9];
     
     // Remove tap gesture
@@ -229,20 +229,20 @@
     NSMutableString *info = [NSMutableString string];
     
     // Class name
-    [info appendFormat:@"📦 Class: %@\n\n", NSStringFromClass([view class])];
+    [info appendFormat:@"ð¦ Class: %@\n\n", NSStringFromClass([view class])];
     
     // Frame
-    [info appendFormat:@"📐 Frame:\n"];
+    [info appendFormat:@"ð Frame:\n"];
     [info appendFormat:@"  Origin: (%.1f, %.1f)\n", view.frame.origin.x, view.frame.origin.y];
-    [info appendFormat:@"  Size: %.1f × %.1f\n\n", view.frame.size.width, view.frame.size.height];
+    [info appendFormat:@"  Size: %.1f Ã %.1f\n\n", view.frame.size.width, view.frame.size.height];
     
     // Bounds
-    [info appendFormat:@"📏 Bounds:\n"];
+    [info appendFormat:@"ð Bounds:\n"];
     [info appendFormat:@"  Origin: (%.1f, %.1f)\n", view.bounds.origin.x, view.bounds.origin.y];
-    [info appendFormat:@"  Size: %.1f × %.1f\n\n", view.bounds.size.width, view.bounds.size.height];
+    [info appendFormat:@"  Size: %.1f Ã %.1f\n\n", view.bounds.size.width, view.bounds.size.height];
     
     // Properties
-    [info appendFormat:@"⚙️ Properties:\n"];
+    [info appendFormat:@"âï¸ Properties:\n"];
     [info appendFormat:@"  Hidden: %@\n", view.hidden ? @"YES" : @"NO"];
     [info appendFormat:@"  Alpha: %.2f\n", view.alpha];
     [info appendFormat:@"  Background: %@\n", view.backgroundColor ?: @"nil"];
@@ -252,7 +252,7 @@
     // Special properties for specific classes
     if ([view isKindOfClass:[UILabel class]]) {
         UILabel *label = (UILabel *)view;
-        [info appendFormat:@"📝 Label Properties:\n"];
+        [info appendFormat:@"ð Label Properties:\n"];
         [info appendFormat:@"  Text: %@\n", label.text ?: @"nil"];
         [info appendFormat:@"  Font: %@\n", label.font.fontName];
         [info appendFormat:@"  Font Size: %.1f\n", label.font.pointSize];
@@ -260,18 +260,18 @@
         [info appendFormat:@"  Lines: %ld\n\n", (long)label.numberOfLines];
     } else if ([view isKindOfClass:[UIButton class]]) {
         UIButton *button = (UIButton *)view;
-        [info appendFormat:@"🔘 Button Properties:\n"];
+        [info appendFormat:@"ð Button Properties:\n"];
         [info appendFormat:@"  Title: %@\n", [button titleForState:UIControlStateNormal] ?: @"nil"];
         [info appendFormat:@"  Enabled: %@\n", button.enabled ? @"YES" : @"NO"];
         [info appendFormat:@"  Selected: %@\n\n", button.selected ? @"YES" : @"NO"];
     } else if ([view isKindOfClass:[UIImageView class]]) {
         UIImageView *imageView = (UIImageView *)view;
-        [info appendFormat:@"🖼 ImageView Properties:\n"];
+        [info appendFormat:@"ð¼ ImageView Properties:\n"];
         [info appendFormat:@"  Image: %@\n", imageView.image ? @"Present" : @"nil"];
         [info appendFormat:@"  Content Mode: %ld\n\n", (long)imageView.contentMode];
     } else if ([view isKindOfClass:[UITextField class]]) {
         UITextField *textField = (UITextField *)view;
-        [info appendFormat:@"✏️ TextField Properties:\n"];
+        [info appendFormat:@"âï¸ TextField Properties:\n"];
         [info appendFormat:@"  Text: %@\n", textField.text ?: @"nil"];
         [info appendFormat:@"  Placeholder: %@\n", textField.placeholder ?: @"nil"];
         [info appendFormat:@"  Secure: %@\n\n", textField.secureTextEntry ? @"YES" : @"NO"];
@@ -279,22 +279,22 @@
     
     // Gesture recognizers
     if (view.gestureRecognizers.count > 0) {
-        [info appendFormat:@"👆 Gesture Recognizers (%lu):\n", (unsigned long)view.gestureRecognizers.count];
+        [info appendFormat:@"ð Gesture Recognizers (%lu):\n", (unsigned long)view.gestureRecognizers.count];
         for (UIGestureRecognizer *gesture in view.gestureRecognizers) {
-            [info appendFormat:@"  • %@\n", NSStringFromClass([gesture class])];
+            [info appendFormat:@"  â¢ %@\n", NSStringFromClass([gesture class])];
         }
         [info appendString:@"\n"];
     }
     
     // Subviews
-    [info appendFormat:@"🌳 Subviews (%lu):\n", (unsigned long)view.subviews.count];
+    [info appendFormat:@"ð³ Subviews (%lu):\n", (unsigned long)view.subviews.count];
     for (UIView *subview in view.subviews) {
-        [info appendFormat:@"  • %@\n", NSStringFromClass([subview class])];
+        [info appendFormat:@"  â¢ %@\n", NSStringFromClass([subview class])];
     }
     
     // Accessibility
     if (view.accessibilityLabel || view.accessibilityHint) {
-        [info appendString:@"\n♿️ Accessibility:\n"];
+        [info appendString:@"\nâ¿ï¸ Accessibility:\n"];
         if (view.accessibilityLabel) {
             [info appendFormat:@"  Label: %@\n", view.accessibilityLabel];
         }
@@ -308,11 +308,11 @@
         UIControl *control = (UIControl *)view;
         NSArray *targets = [control allTargets].allObjects;
         if (targets.count > 0) {
-            [info appendString:@"\n🎯 Target-Actions:\n"];
+            [info appendString:@"\nð¯ Target-Actions:\n"];
             for (id target in targets) {
                 NSArray *actions = [control actionsForTarget:target forControlEvent:UIControlEventAllEvents];
                 for (NSString *action in actions) {
-                    [info appendFormat:@"  • %@ -> %@\n", NSStringFromClass([target class]), action];
+                    [info appendFormat:@"  â¢ %@ -> %@\n", NSStringFromClass([target class]), action];
                 }
             }
         }
@@ -348,6 +348,7 @@
 
 @end
 
+// Constructor to inject the inspector window
 __attribute__((constructor))
 static void initialize() {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -364,5 +365,3 @@ static void initialize() {
         }
     });
 }
-
-@end
