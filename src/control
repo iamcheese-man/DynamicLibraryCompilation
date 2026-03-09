@@ -1,8 +1,0 @@
-Package: com.you.adskip
-Name: AdSkip
-Version: 1.0
-Architecture: iphoneos-arm64
-Description: Skips Unity Ads instantly and grants rewards
-Maintainer: you
-Author: you
-Section: Tweaks
