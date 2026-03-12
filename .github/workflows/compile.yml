@@ -57,17 +57,20 @@ jobs:
         if: inputs.project_type == 'objc-dylib'
         run: |
           cd src
-          M_FILES=$(find . -name "*.m" -type f)
+          M_FILES=$(find . \( -name "*.m" -o -name "*.mm" \) -type f)
           C_FILES=$(find . -name "*.c" -type f)
-          clang -dynamiclib -fobjc-arc -o liboutput.dylib \
+          clang++ -dynamiclib -fobjc-arc -o liboutput.dylib \
             $M_FILES $C_FILES \
             -arch arm64 \
             -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
             -mios-version-min=14.0 \
+            -std=c++17 \
             -framework Foundation \
             -framework UIKit \
             -framework AVFoundation \
-            -framework CoreGraphics
+            -framework CoreGraphics \
+            -framework QuartzCore \
+            -lobjc
           mkdir -p ../build
           mv liboutput.dylib ../build/
 
@@ -91,7 +94,6 @@ jobs:
           cd src
           make package
           mkdir -p ../build
-          # Copy dylib directly too for dylib-only output
           find .theos/obj -name "*.dylib" | head -1 | xargs -I{} cp {} ../build/liboutput.dylib 2>/dev/null || true
           cp packages/*.deb ../build/ 2>/dev/null || true
 
