@@ -6,34 +6,7 @@
 #include <stdint.h>
 #include <dlfcn.h>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Bedrock AbilitiesComponent layout (stable since 1.16, confirmed in strings)
-// Abilities are stored as a packed bool array inside AbilitiesComponent
-// Known indices from Horion SDK + our string analysis:
-//
-//   Index  Name
-//   0x00   build
-//   0x01   mine  
-//   0x02   doorsandswitches
-//   0x03   opencontainers
-//   0x04   attackplayers
-//   0x05   attackmobs
-//   0x06   operatorcommands
-//   0x07   teleport
-//   0x08   invulnerable
-//   0x09   flying          ← our string at 0x0b5348ba
-//   0x0A   mayfly          ← our string at 0x0b5348c1
-//   0x0B   lightning
-//   0x0C   flyspeed        (float, not bool)
-//   0x0D   walkspeed       (float, not bool)
-//   0x0E   noclip          ← our string at 0x0b5348db
-//   0x0F   privilegedbuilder
-//
-// The bool array starts at offset +0x0 from AbilitiesComponent*
-// AbilitiesComponent is stored inside Player at a known offset
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Ability bool indices in the array
+// ─── Ability indices (stable across Bedrock versions) ─────────────────────────
 static const int ABILITY_FLYING  = 9;
 static const int ABILITY_MAYFLY  = 10;
 static const int ABILITY_NOCLIP  = 14;
@@ -41,6 +14,8 @@ static const int ABILITY_NOCLIP  = 14;
 // ─── Globals ──────────────────────────────────────────────────────────────────
 static bool g_flyEnabled = false;
 static UIButton *g_toggleBtn = nil;
+static CADisplayLink *g_displayLink = nil;
+static uint8_t *g_abilitiesBase = nullptr;
 
 // ─── ASLR slide ───────────────────────────────────────────────────────────────
 static uintptr_t getSlide() {
@@ -53,91 +28,65 @@ static uintptr_t getSlide() {
     return 0;
 }
 
-// ─── Memory scan for abilities string table ───────────────────────────────────
-// Scans for "flying\0mayfly\0" which is unique in the binary
-// Returns pointer to "flying" string if found
+// ─── String table verification ────────────────────────────────────────────────
 static const uint8_t *findAbilitiesStringTable() {
     uintptr_t slide = getSlide();
     if (!slide) return nullptr;
-
-    // From our r2 analysis: strings are in __TEXT.__cstring around 0x0b534000
-    // Search a window around that page (±0x20000) to be safe across minor versions
-    uintptr_t searchStart = slide + 0x0b510000;
-    uintptr_t searchEnd   = slide + 0x0b560000;
 
     const uint8_t pattern[] = {
         'f','l','y','i','n','g','\0',
         'm','a','y','f','l','y','\0'
     };
-    const size_t patLen = sizeof(pattern);
 
-    for (uintptr_t addr = searchStart; addr < searchEnd - patLen; addr++) {
-        if (memcmp((void *)addr, pattern, patLen) == 0) {
-            NSLog(@"[FlyHack] Found 'flying\\0mayfly\\0' at 0x%lx (slide=0x%lx)", addr, slide);
+    uintptr_t searchStart = slide + 0x0b510000;
+    uintptr_t searchEnd   = slide + 0x0b560000;
+
+    for (uintptr_t addr = searchStart; addr < searchEnd - sizeof(pattern); addr++) {
+        if (memcmp((void *)addr, pattern, sizeof(pattern)) == 0) {
+            NSLog(@"[FlyHack] String table found at 0x%lx", addr);
             return (const uint8_t *)addr;
         }
     }
-    NSLog(@"[FlyHack] WARNING: Could not find abilities string table");
+    NSLog(@"[FlyHack] WARNING: String table not found");
     return nullptr;
 }
 
-// ─── Patch abilities via mach_vm_write ────────────────────────────────────────
-// We locate the LocalPlayer's AbilitiesComponent in the heap by scanning
-// for the known bool pattern near the abilities string address.
-// 
-// Since we can't easily walk the LocalPlayer pointer chain without offsets,
-// we use a simpler approach: hook a known ObjC method that fires every frame
-// and write directly to the abilities memory found via pattern scan.
-
-static uint8_t *g_abilitiesBase = nullptr;
-
-// Scan heap for AbilitiesComponent bool array
-// The array looks like: 1 1 1 1 1 1 1 1 0 [flying] [mayfly] ...
-// in survival mode with full permissions except fly
+// ─── Heap scan for AbilitiesComponent ────────────────────────────────────────
 static uint8_t *findAbilitiesInHeap() {
-    // We scan memory regions for the pattern
-    // In creative mode player has mayfly=1, flying=0/1
-    // In survival: all 0 except first 8 (build/mine/doors/etc) = 1
-    // Pattern to look for: sequence of bool-sized (1 byte) values
-    // 01 01 01 01 01 01 00 00 00 00 00 ... (survival default)
-    // This is quite broad, so we narrow by searching near known text offsets
+    // Survival default ability pattern:
+    // build=1 mine=1 doorsandswitches=1 opencontainers=1
+    // attackplayers=1 attackmobs=1 operatorcommands=0 teleport=0
+    // invulnerable=0 flying=0 mayfly=0 lightning=0
+    const uint8_t pattern[] = {1,1,1,1,1,1,0,0,0,0,0,0};
 
     vm_address_t addr = 0;
     vm_size_t size = 0;
-    kern_return_t kr;
     mach_port_t task = mach_task_self();
 
-    // Known pattern for survival player abilities (first 16 bytes)
-    // build=1 mine=1 doorsandswitches=1 opencontainers=1
-    // attackplayers=1 attackmobs=1 operatorcommands=0 teleport=0
-    // invulnerable=0 flying=0 mayfly=0 lightning=0 ...
-    const uint8_t survivalPattern[] = {1,1,1,1,1,1,0,0,0,0,0,0};
-    
     while (true) {
         vm_region_basic_info_data_64_t info;
         mach_msg_type_number_t infoCount = VM_REGION_BASIC_INFO_COUNT_64;
         mach_port_t objectName;
-        
-        kr = vm_region_64(task, &addr, &size,
-                         VM_REGION_BASIC_INFO_64,
-                         (vm_region_info_t)&info,
-                         &infoCount, &objectName);
+
+        kern_return_t kr = vm_region_64(task, &addr, &size,
+                                        VM_REGION_BASIC_INFO_64,
+                                        (vm_region_info_t)&info,
+                                        &infoCount, &objectName);
         if (kr != KERN_SUCCESS) break;
-        
-        // Only scan read-write heap regions
-        if ((info.protection & VM_PROT_READ) && 
+
+        if ((info.protection & VM_PROT_READ) &&
             (info.protection & VM_PROT_WRITE) &&
-            size < 50 * 1024 * 1024) { // skip huge regions
-            
+            size < 50 * 1024 * 1024) {
+
             uint8_t *ptr = (uint8_t *)addr;
-            uint8_t *end = ptr + size - sizeof(survivalPattern);
-            
+            uint8_t *end = ptr + size - sizeof(pattern);
+
             while (ptr < end) {
-                if (memcmp(ptr, survivalPattern, sizeof(survivalPattern)) == 0) {
+                if (memcmp(ptr, pattern, sizeof(pattern)) == 0) {
                     NSLog(@"[FlyHack] Candidate abilities struct at %p", ptr);
                     return ptr;
                 }
-                ptr += 4; // step by 4 for speed
+                ptr += 4;
             }
         }
         addr += size;
@@ -145,34 +94,28 @@ static uint8_t *findAbilitiesInHeap() {
     return nullptr;
 }
 
+// ─── Apply fly ────────────────────────────────────────────────────────────────
 static void applyFly(bool enable) {
     if (!g_abilitiesBase) {
-        NSLog(@"[FlyHack] Searching for abilities struct...");
+        NSLog(@"[FlyHack] Scanning heap for abilities struct...");
         g_abilitiesBase = findAbilitiesInHeap();
     }
     if (!g_abilitiesBase) {
-        NSLog(@"[FlyHack] Could not find abilities struct");
+        NSLog(@"[FlyHack] Could not find abilities struct — are you in a world?");
         return;
     }
-    
-    // Make memory writable
-    vm_protect(mach_task_self(), 
-               (vm_address_t)g_abilitiesBase, 
+
+    vm_protect(mach_task_self(),
+               (vm_address_t)g_abilitiesBase,
                32, FALSE,
                VM_PROT_READ | VM_PROT_WRITE);
-    
+
     g_abilitiesBase[ABILITY_FLYING] = enable ? 1 : 0;
     g_abilitiesBase[ABILITY_MAYFLY] = enable ? 1 : 0;
-    
-    NSLog(@"[FlyHack] Set flying=%d mayfly=%d at %p", 
-          enable, enable, g_abilitiesBase);
+    NSLog(@"[FlyHack] flying=%d mayfly=%d @ %p", enable, enable, g_abilitiesBase);
 }
 
-// ─── Every-frame hook via display link ────────────────────────────────────────
-// We use CADisplayLink to call applyFly every frame
-// This ensures the ability stays set even if the game resets it
-static CADisplayLink *g_displayLink = nil;
-
+// ─── Display link ticker ──────────────────────────────────────────────────────
 @interface FlyHackTicker : NSObject
 + (void)tick:(CADisplayLink *)link;
 @end
@@ -185,7 +128,7 @@ static CADisplayLink *g_displayLink = nil;
 }
 @end
 
-// ─── UI ───────────────────────────────────────────────────────────────────────
+// ─── Button actions ───────────────────────────────────────────────────────────
 @interface FlyHackUI : NSObject
 + (void)toggle:(UIButton *)btn;
 + (void)handlePan:(UIPanGestureRecognizer *)pan;
@@ -195,15 +138,13 @@ static CADisplayLink *g_displayLink = nil;
 
 + (void)toggle:(UIButton *)btn {
     g_flyEnabled = !g_flyEnabled;
-    
+
     if (g_flyEnabled) {
-        // Reset cached pointer so we rescan fresh
-        g_abilitiesBase = nullptr;
+        g_abilitiesBase = nullptr; // rescan fresh each time
         applyFly(true);
         [btn setTitle:@"✈ FLY ON" forState:UIControlStateNormal];
         btn.backgroundColor = [UIColor colorWithRed:0.0 green:0.75 blue:0.2 alpha:0.9];
-        
-        // Start display link to keep fly forced
+
         g_displayLink = [CADisplayLink displayLinkWithTarget:[FlyHackTicker class]
                                                     selector:@selector(tick:)];
         [g_displayLink addToRunLoop:NSRunLoop.mainRunLoop
@@ -212,12 +153,12 @@ static CADisplayLink *g_displayLink = nil;
         applyFly(false);
         [btn setTitle:@"✈ FLY" forState:UIControlStateNormal];
         btn.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.15 alpha:0.9];
-        
+
         [g_displayLink invalidate];
         g_displayLink = nil;
         g_abilitiesBase = nullptr;
     }
-    
+
     NSLog(@"[FlyHack] Toggled: %s", g_flyEnabled ? "ON" : "OFF");
 }
 
@@ -232,59 +173,77 @@ static CADisplayLink *g_displayLink = nil;
 
 // ─── Setup UI ─────────────────────────────────────────────────────────────────
 static void setupUI() {
-    UIWindow *window = nil;
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if ([scene isKindOfClass:[UIWindowScene class]]) {
-            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-                if (w.isKeyWindow) { window = w; break; }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Get all windows from all scenes
+        UIWindow *window = nil;
+        NSArray<UIWindow *> *allWindows = nil;
+
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                allWindows = ((UIWindowScene *)scene).windows;
             }
         }
-    }
-    if (!window) {
-        NSLog(@"[FlyHack] No key window found, retrying...");
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
-                       dispatch_get_main_queue(), ^{ setupUI(); });
-        return;
-    }
-    
-    CGRect screen = UIScreen.mainScreen.bounds;
-    g_toggleBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    g_toggleBtn.frame = CGRectMake(screen.size.width - 100, 100, 90, 36);
-    g_toggleBtn.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.15 alpha:0.9];
-    g_toggleBtn.layer.cornerRadius = 8;
-    g_toggleBtn.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.3].CGColor;
-    g_toggleBtn.layer.borderWidth = 1;
-    g_toggleBtn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    [g_toggleBtn setTitle:@"✈ FLY" forState:UIControlStateNormal];
-    [g_toggleBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    
-    [g_toggleBtn addTarget:[FlyHackUI class]
-                    action:@selector(toggle:)
-          forControlEvents:UIControlEventTouchUpInside];
-    
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
-        initWithTarget:[FlyHackUI class]
-                action:@selector(handlePan:)];
-    [g_toggleBtn addGestureRecognizer:pan];
-    
-    [window addSubview:g_toggleBtn];
-    NSLog(@"[FlyHack] Button added to window");
+
+        // MC puts its Metal render window last — use lastObject
+        window = allWindows.lastObject;
+
+        if (!window) {
+            NSLog(@"[FlyHack] No window found, retrying in 2s...");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                           dispatch_get_main_queue(), ^{ setupUI(); });
+            return;
+        }
+
+        NSLog(@"[FlyHack] Using window: %@ (level: %f)", window, window.windowLevel);
+
+        CGRect screen = UIScreen.mainScreen.bounds;
+
+        g_toggleBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        g_toggleBtn.frame = CGRectMake(screen.size.width - 100, 100, 90, 36);
+        g_toggleBtn.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.15 alpha:0.9];
+        g_toggleBtn.layer.cornerRadius = 8;
+        g_toggleBtn.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.3].CGColor;
+        g_toggleBtn.layer.borderWidth = 1;
+        g_toggleBtn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
+        [g_toggleBtn setTitle:@"✈ FLY" forState:UIControlStateNormal];
+        [g_toggleBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+
+        // Raise above MC's Metal layer
+        g_toggleBtn.layer.zPosition = 9999;
+
+        // Bump window level so our button isn't buried
+        window.windowLevel = UIWindowLevelAlert + 1;
+
+        [g_toggleBtn addTarget:[FlyHackUI class]
+                        action:@selector(toggle:)
+              forControlEvents:UIControlEventTouchUpInside];
+
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
+            initWithTarget:[FlyHackUI class]
+                    action:@selector(handlePan:)];
+        [g_toggleBtn addGestureRecognizer:pan];
+
+        [window addSubview:g_toggleBtn];
+        [window bringSubviewToFront:g_toggleBtn];
+
+        NSLog(@"[FlyHack] Button added to window successfully");
+    });
 }
 
 // ─── Constructor ──────────────────────────────────────────────────────────────
 __attribute__((constructor))
 static void FlyHackInit() {
     NSLog(@"[FlyHack] Injected into %@", NSBundle.mainBundle.bundleIdentifier);
-    
-    // Verify binary layout matches our analysis
+
+    // Verify binary layout
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC),
                    dispatch_get_main_queue(), ^{
         const uint8_t *strTable = findAbilitiesStringTable();
         NSLog(@"[FlyHack] String table: %s", strTable ? "FOUND ✓" : "NOT FOUND ✗");
     });
-    
-    // Setup UI after MC has loaded
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC),
+
+    // Wait 8 seconds for MC to fully initialize its Metal window
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC),
                    dispatch_get_main_queue(), ^{
         setupUI();
     });
