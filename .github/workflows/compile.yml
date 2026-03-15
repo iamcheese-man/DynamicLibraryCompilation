@@ -70,6 +70,7 @@ jobs:
             -framework AVFoundation \
             -framework CoreGraphics \
             -framework QuartzCore \
+            -framework Security \
             -lobjc
           mkdir -p ../build
           mv liboutput.dylib ../build/
