@@ -1,12 +1,17 @@
 #import <UIKit/UIKit.h>
 #import <Security/Security.h>
 
-static void showKeychainDump(NSString *label) {
+@interface KeychainDumper : NSObject
++ (void)dump;
+@end
+
+@implementation KeychainDumper
++ (void)dump {
     NSDictionary *query = @{
-        (__bridge id)kSecClass:                (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecReturnAttributes:     @YES,
-        (__bridge id)kSecReturnData:           @YES,
-        (__bridge id)kSecMatchLimit:           (__bridge id)kSecMatchLimitAll,
+        (__bridge id)kSecClass:            (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecReturnAttributes: @YES,
+        (__bridge id)kSecReturnData:       @YES,
+        (__bridge id)kSecMatchLimit:       (__bridge id)kSecMatchLimitAll,
     };
 
     CFTypeRef result = NULL;
@@ -30,29 +35,26 @@ static void showKeychainDump(NSString *label) {
         [output appendFormat:@"status=%d", (int)status];
     }
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *window = nil;
-        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-            if ([scene isKindOfClass:[UIWindowScene class]]) {
-                window = ((UIWindowScene *)scene).windows.firstObject;
-                break;
-            }
+    UIWindow *window = nil;
+    for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            window = ((UIWindowScene *)scene).windows.firstObject;
+            break;
         }
-        if (!window) return;
+    }
+    if (!window) return;
 
-        UIAlertController *alert = [UIAlertController
-            alertControllerWithTitle:label
-            message:output
-            preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [UIPasteboard generalPasteboard].string = output;
-        }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-        [window.rootViewController presentViewController:alert animated:YES completion:nil];
-    });
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"Keychain Dump"
+        message:output
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [UIPasteboard generalPasteboard].string = output;
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
-
-static UIButton *gDumpButton = nil;
+@end
 
 __attribute__((constructor))
 static void init(void) {
@@ -74,14 +76,10 @@ static void init(void) {
         [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         btn.layer.cornerRadius = 8;
         btn.layer.zPosition = 9999;
-
-        static int dumpCount = 0;
-        [btn addTarget:[NSBlockOperation blockOperationWithBlock:^{
-            dumpCount++;
-            showKeychainDump([NSString stringWithFormat:@"Dump #%d", dumpCount]);
-        }] action:@selector(main) forControlEvents:UIControlEventTouchUpInside];
+        [btn addTarget:[KeychainDumper class]
+                action:@selector(dump)
+      forControlEvents:UIControlEventTouchUpInside];
 
         [window addSubview:btn];
-        gDumpButton = btn;
     });
 }
