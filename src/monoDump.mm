@@ -88,7 +88,6 @@ MonoDomain* waitForMono() {
 void dumpClasses() {
     std::string path = getPath();
     logFile.open(path);
-    MonoDomain* domain = nullptr;
 
     for (int i = 0; i < 60; i++) {
         domain = mono_get_root_domain();
