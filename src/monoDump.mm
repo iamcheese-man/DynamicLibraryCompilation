@@ -10,7 +10,7 @@ typedef struct _MonoDomain MonoDomain;
 typedef struct _MonoAssembly MonoAssembly;
 typedef struct _MonoImage MonoImage;
 typedef struct _MonoTableInfo MonoTableInfo;
-
+MonoDomain* domain = nullptr;
 // Function pointers
 MonoDomain* (*mono_get_root_domain)();
 void (*mono_thread_attach)(MonoDomain*);
@@ -72,7 +72,6 @@ bool isGameAssembly(const char* name) {
 
 // Wait for Mono
 MonoDomain* waitForMono() {
-    MonoDomain* domain = nullptr;
 
     for (int i = 0; i < 15; i++) {
         domain = mono_get_root_domain();
