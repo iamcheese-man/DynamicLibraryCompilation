@@ -88,7 +88,23 @@ MonoDomain* waitForMono() {
 void dumpClasses() {
     std::string path = getPath();
     logFile.open(path);
+    MonoDomain* domain = nullptr;
 
+    for (int i = 0; i < 60; i++) {
+        domain = mono_get_root_domain();
+        if (domain) break;
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    if (!domain) {
+        LOG("[FAIL] Mono never initialized");
+        return;
+    }
+
+    mono_thread_attach(domain);
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
     if (!logFile.is_open()) return;
 
     LOG("=== Mono Class Dump (Game Only) ===");
