@@ -1,7 +1,6 @@
 // ToSAdBypass.mm
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <WebKit/WebKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -11,214 +10,141 @@ typedef NS_ENUM(NSInteger, UnityAdsFinishState) {
     kUnityShowCompletionStateCompleted = 2,
 };
 
-@protocol UnityAdsShowDelegate <NSObject>
-@optional
-- (void)unityAdsShowComplete:(NSString *)placementId withFinish:(UnityAdsFinishState)state;
-- (void)unityAdsShowStart:(NSString *)placementId;
-@end
-
 @protocol UnityAdsLoadDelegate <NSObject>
 @optional
 - (void)unityAdsAdLoaded:(NSString *)placementId;
 @end
 
 typedef void (*PresentVCIMP)(id, SEL, UIViewController *, BOOL, void(^)(void));
-typedef void (*SetNavDelegateIMP)(id, SEL, id);
-
 static PresentVCIMP orig_presentVC = NULL;
-static SetNavDelegateIMP orig_setNavDelegate = NULL;
 
-static id gLastShowDelegate = nil;
-static NSString *gLastPlacementId = nil;
-static NSMutableArray *gNavDelegates = nil;
-
-static void FireComplete(void) {
-    id delegate = gLastShowDelegate;
-    NSString *placement = gLastPlacementId;
-    if (!delegate || !placement) return;
-    gLastShowDelegate = nil;
-    gLastPlacementId = nil;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if ([delegate respondsToSelector:@selector(unityAdsShowStart:)])
-            ((void(*)(id,SEL,NSString*))objc_msgSend)(delegate, @selector(unityAdsShowStart:), placement);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if ([delegate respondsToSelector:@selector(unityAdsShowComplete:withFinish:)])
-                ((void(*)(id,SEL,NSString*,NSInteger))objc_msgSend)(delegate,
-                    @selector(unityAdsShowComplete:withFinish:), placement, 2);
-        });
-    });
-}
-
-static void DismissTopVC(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
-#pragma clang diagnostic pop
-        UIViewController *top = root;
-        while (top.presentedViewController) top = top.presentedViewController;
-        if (top != root) {
-            [top dismissViewControllerAnimated:NO completion:nil];
+static void InstallUnityHooks(void) {
+    // ---------------------------------------------------------------
+    // CORE HOOK: USRVApiSdk sendShowCompleteEvent:listenerID:state:
+    // This is what actually signals IL2CPP that the ad finished.
+    // Force state to kUnityShowCompletionStateCompleted (2) always.
+    // ---------------------------------------------------------------
+    Class sdkClass = NSClassFromString(@"USRVApiSdk");
+    if (sdkClass) {
+        SEL completeSel = NSSelectorFromString(@"sendShowCompleteEvent:listenerID:state:");
+        Method cm = class_getClassMethod(sdkClass, completeSel);
+        if (cm) {
+            IMP origComplete = method_getImplementation(cm);
+            method_setImplementation(cm, imp_implementationWithBlock(
+                ^(id self, NSString *placementId, NSString *listenerID, NSInteger state) {
+                    // Always send Completed regardless of actual state
+                    ((void(*)(id,SEL,NSString*,NSString*,NSInteger))origComplete)(
+                        self, completeSel, placementId, listenerID, kUnityShowCompletionStateCompleted);
+                }
+            ));
         }
-    });
-}
 
-static BOOL IsAdHost(NSString *host) {
-    if (!host) return NO;
-    return [host containsString:@"unity3d.com"] ||
-           [host containsString:@"googlesyndication.com"] ||
-           [host containsString:@"doubleclick.net"] ||
-           [host containsString:@"googleadservices.com"] ||
-           [host containsString:@"unityads.unity3d.com"] ||
-           [host containsString:@"webview.unity3d.com"];
-}
-
-@interface ToSNavDelegate : NSObject <WKNavigationDelegate>
-@property (nonatomic, weak) id<WKNavigationDelegate> original;
-@end
-
-@implementation ToSNavDelegate
-
-- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {
-    if (IsAdHost(webView.URL.host)) {
-        [webView stopLoading];
-        if (gLastShowDelegate) FireComplete();
-        else DismissTopVC();
-        return;
+        // Also hook sendShowStartEvent so the flow looks normal
+        SEL startSel = NSSelectorFromString(@"sendShowStartEvent:listenerID:");
+        Method sm = class_getClassMethod(sdkClass, startSel);
+        if (sm) {
+            // Let this one through untouched — just confirm it exists
+        }
     }
-    if ([self.original respondsToSelector:@selector(webView:didStartProvisionalNavigation:)])
-        [self.original webView:webView didStartProvisionalNavigation:navigation];
-}
 
-- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
-    if (IsAdHost(navigationAction.request.URL.host)) {
-        decisionHandler(WKNavigationActionPolicyCancel);
-        if (gLastShowDelegate) FireComplete();
-        else DismissTopVC();
-        return;
+    // ---------------------------------------------------------------
+    // SECONDARY HOOK: UADSApiAdUnit sendShowCompleteEvent (older path)
+    // ---------------------------------------------------------------
+    Class adUnitClass = NSClassFromString(@"UADSApiAdUnit");
+    if (adUnitClass) {
+        SEL completeSel2 = NSSelectorFromString(@"sendShowCompleteEvent:listenerID:state:");
+        Method cm2 = class_getClassMethod(adUnitClass, completeSel2);
+        if (cm2) {
+            IMP origComplete2 = method_getImplementation(cm2);
+            method_setImplementation(cm2, imp_implementationWithBlock(
+                ^(id self, NSString *placementId, NSString *listenerID, NSInteger state) {
+                    ((void(*)(id,SEL,NSString*,NSString*,NSInteger))origComplete2)(
+                        self, completeSel2, placementId, listenerID, kUnityShowCompletionStateCompleted);
+                }
+            ));
+        }
     }
-    if ([self.original respondsToSelector:@selector(webView:decidePolicyForNavigationAction:decisionHandler:)])
-        [self.original webView:webView decidePolicyForNavigationAction:navigationAction decisionHandler:decisionHandler];
-    else
-        decisionHandler(WKNavigationActionPolicyAllow);
-}
 
-- (void)forwardInvocation:(NSInvocation *)invocation {
-    if ([self.original respondsToSelector:invocation.selector])
-        [invocation invokeWithTarget:self.original];
-}
+    // ---------------------------------------------------------------
+    // GMARewardedAdDelegateProxy: onAdComplete:network:rewarded:
+    // Force rewarded=YES for AdMob path
+    // ---------------------------------------------------------------
+    Class gmaClass = NSClassFromString(@"GMARewardedAdDelegateProxy");
+    if (gmaClass) {
+        SEL onCompleteSel = NSSelectorFromString(@"onAdComplete:network:rewarded:");
+        Method pm = class_getInstanceMethod(gmaClass, onCompleteSel);
+        if (pm) {
+            IMP origOnComplete = method_getImplementation(pm);
+            method_setImplementation(pm, imp_implementationWithBlock(
+                ^(id self, id meta, NSString *network, BOOL rewarded) {
+                    ((void(*)(id,SEL,id,NSString*,BOOL))origOnComplete)(
+                        self, onCompleteSel, meta, network, YES);
+                }
+            ));
+        }
+    }
 
-- (BOOL)respondsToSelector:(SEL)aSelector {
-    return [super respondsToSelector:aSelector] || [self.original respondsToSelector:aSelector];
-}
+    // ---------------------------------------------------------------
+    // Fake load so isReady passes without real network fetch
+    // ---------------------------------------------------------------
+    Class UAClass = NSClassFromString(@"UnityAds");
+    if (UAClass) {
+        SEL loadSel = NSSelectorFromString(@"load:loadDelegate:");
+        Method lm = class_getClassMethod(UAClass, loadSel);
+        if (lm) {
+            method_setImplementation(lm, imp_implementationWithBlock(
+                ^(id self, NSString *placementId, id<UnityAdsLoadDelegate> loadDelegate) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if ([loadDelegate respondsToSelector:@selector(unityAdsAdLoaded:)])
+                            [loadDelegate unityAdsAdLoaded:placementId];
+                    });
+                }
+            ));
+        }
 
-@end
-
-static void hooked_setNavDelegate(WKWebView *self, SEL _cmd, id<WKNavigationDelegate> delegate) {
-    if (delegate) {
-        ToSNavDelegate *spy = [[ToSNavDelegate alloc] init];
-        spy.original = delegate;
-        [gNavDelegates addObject:spy];
-        orig_setNavDelegate(self, _cmd, spy);
-    } else {
-        orig_setNavDelegate(self, _cmd, delegate);
+        SEL loadOptSel = NSSelectorFromString(@"load:options:loadDelegate:");
+        Method lm2 = class_getClassMethod(UAClass, loadOptSel);
+        if (lm2) {
+            method_setImplementation(lm2, imp_implementationWithBlock(
+                ^(id self, NSString *placementId, id opts, id<UnityAdsLoadDelegate> loadDelegate) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if ([loadDelegate respondsToSelector:@selector(unityAdsAdLoaded:)])
+                            [loadDelegate unityAdsAdLoaded:placementId];
+                    });
+                }
+            ));
+        }
     }
 }
 
+// Dismiss any ad VC that gets presented — so the ad UI doesn't appear
 static void hooked_presentVC(id self, SEL _cmd, UIViewController *vc, BOOL animated, void(^completion)(void)) {
     NSString *cn = NSStringFromClass([vc class]);
-    if ([cn containsString:@"UnityAds"] ||
+    if ([cn containsString:@"Unity"] ||
         [cn containsString:@"UADS"] ||
-        [cn containsString:@"GADFullScreen"] ||
-        [cn containsString:@"GMAFullScreen"]) {
+        [cn containsString:@"USRV"] ||
+        [cn containsString:@"GADFull"] ||
+        [cn containsString:@"GMAFull"]) {
+        // Dismiss instantly, let the complete event fire from the hook above
         if (completion) completion();
-        if (gLastShowDelegate) FireComplete();
-        else DismissTopVC();
         return;
     }
     orig_presentVC(self, _cmd, vc, animated, completion);
 }
 
-static void InstallUnityHooks(void) {
-    Class UAClass = NSClassFromString(@"UnityAds");
-    if (!UAClass) return;
-
-    SEL showSel = NSSelectorFromString(@"show:placementId:showDelegate:");
-    Method sm = class_getClassMethod(UAClass, showSel);
-    if (sm) {
-        IMP origShow = method_getImplementation(sm);
-        method_setImplementation(sm, imp_implementationWithBlock(
-            ^(id self, UIViewController *vc, NSString *placementId, id<UnityAdsShowDelegate> delegate) {
-                gLastShowDelegate = delegate;
-                gLastPlacementId = placementId;
-                ((void(*)(id,SEL,UIViewController*,NSString*,id))origShow)(self, showSel, vc, placementId, delegate);
-            }
-        ));
-    }
-
-    SEL showOptSel = NSSelectorFromString(@"show:placementId:options:showDelegate:");
-    Method sm2 = class_getClassMethod(UAClass, showOptSel);
-    if (sm2) {
-        IMP origShow2 = method_getImplementation(sm2);
-        method_setImplementation(sm2, imp_implementationWithBlock(
-            ^(id self, UIViewController *vc, NSString *placementId, id opts, id<UnityAdsShowDelegate> delegate) {
-                gLastShowDelegate = delegate;
-                gLastPlacementId = placementId;
-                ((void(*)(id,SEL,UIViewController*,NSString*,id,id))origShow2)(self, showOptSel, vc, placementId, opts, delegate);
-            }
-        ));
-    }
-
-    SEL loadSel = NSSelectorFromString(@"load:loadDelegate:");
-    Method lm = class_getClassMethod(UAClass, loadSel);
-    if (lm) {
-        method_setImplementation(lm, imp_implementationWithBlock(
-            ^(id self, NSString *placementId, id<UnityAdsLoadDelegate> loadDelegate) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if ([loadDelegate respondsToSelector:@selector(unityAdsAdLoaded:)])
-                        [loadDelegate unityAdsAdLoaded:placementId];
-                });
-            }
-        ));
-    }
-
-    SEL loadOptSel = NSSelectorFromString(@"load:options:loadDelegate:");
-    Method lm2 = class_getClassMethod(UAClass, loadOptSel);
-    if (lm2) {
-        method_setImplementation(lm2, imp_implementationWithBlock(
-            ^(id self, NSString *placementId, id opts, id<UnityAdsLoadDelegate> loadDelegate) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if ([loadDelegate respondsToSelector:@selector(unityAdsAdLoaded:)])
-                        [loadDelegate unityAdsAdLoaded:placementId];
-                });
-            }
-        ));
-    }
-}
-
 __attribute__((constructor))
 static void ToSAdBypassInit(void) {
-    gNavDelegates = [NSMutableArray array];
-
-    Class wkClass = NSClassFromString(@"WKWebView");
-    if (wkClass) {
-        Method m = class_getInstanceMethod(wkClass, @selector(setNavigationDelegate:));
-        if (m) {
-            orig_setNavDelegate = (SetNavDelegateIMP)method_getImplementation(m);
-            method_setImplementation(m, (IMP)hooked_setNavDelegate);
-        }
-    }
-
+    // UIViewController hook — always available immediately
     Method pm = class_getInstanceMethod([UIViewController class],
         @selector(presentViewController:animated:completion:));
     orig_presentVC = (PresentVCIMP)method_getImplementation(pm);
     method_setImplementation(pm, (IMP)hooked_presentVC);
 
+    // Retry until USRVApiSdk is available
     __block int attempts = 0;
     __block void (^tryHook)(void);
     tryHook = ^{
-        if (NSClassFromString(@"UnityAds")) {
+        if (NSClassFromString(@"USRVApiSdk") || NSClassFromString(@"UnityAds")) {
             InstallUnityHooks();
         } else if (attempts < 60) {
             attempts++;
