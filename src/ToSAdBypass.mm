@@ -35,6 +35,7 @@ static PresentVCIMP orig_presentVC = NULL;
 
 static id gLastShowDelegate = nil;
 static NSString *gLastPlacementId = nil;
+static BOOL gFireScheduled = NO;
 
 static void FireComplete(void) {
     id delegate = gLastShowDelegate;
@@ -42,6 +43,7 @@ static void FireComplete(void) {
     if (!delegate || !placement) return;
     gLastShowDelegate = nil;
     gLastPlacementId = nil;
+    gFireScheduled = NO;
 
     dispatch_async(dispatch_get_main_queue(), ^{
         if ([delegate respondsToSelector:@selector(unityAdsShowStart:)])
@@ -63,9 +65,11 @@ static id hooked_loadRequest(id self, SEL _cmd, NSURLRequest *request) {
         [host containsString:@"doubleclick.net"] ||
         [host containsString:@"googleadservices.com"])) {
 
-        FireComplete();
+        if (gLastShowDelegate) {
+            FireComplete();
+        }
 
-        // Walk responder chain for GAD reward handler
+        // Also try GAD reward via responder chain
         UIResponder *responder = (UIResponder *)self;
         while (responder) {
             NSString *cn = NSStringFromClass([responder class]);
@@ -107,7 +111,7 @@ static void hooked_presentVC(id self, SEL _cmd, UIViewController *vc, BOOL anima
 
 __attribute__((constructor))
 static void ToSAdBypassInit(void) {
-    // Hook WKWebView loadRequest — always available at constructor time
+    // Hook WKWebView loadRequest
     Class wkClass = NSClassFromString(@"WKWebView");
     if (wkClass) {
         Method m = class_getInstanceMethod(wkClass, @selector(loadRequest:));
@@ -123,9 +127,8 @@ static void ToSAdBypassInit(void) {
     orig_presentVC = (PresentVCIMP)method_getImplementation(pm);
     method_setImplementation(pm, (IMP)hooked_presentVC);
 
-    // Retry hook for Unity Ads show — captures delegate+placement into globals
+    // Retry hook for Unity Ads show
     __block int attempts = 0;
-    __block __weak void (^tryHook)(void);
     __block void (^tryHookStrong)(void);
     tryHookStrong = ^{
         Class UAClass = NSClassFromString(@"UnityAds");
@@ -133,14 +136,18 @@ static void ToSAdBypassInit(void) {
             SEL showSel = NSSelectorFromString(@"show:placementId:showDelegate:");
             Method sm = class_getClassMethod(UAClass, showSel);
             if (sm) {
+                IMP origShow = method_getImplementation(sm);
                 method_setImplementation(sm, imp_implementationWithBlock(
                     ^(id self, UIViewController *vc, NSString *placementId, id<UnityAdsShowDelegate> delegate) {
                         gLastShowDelegate = delegate;
                         gLastPlacementId = placementId;
-                        // Fallback: fire complete after 1s if webview hook didn't catch it
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                        gFireScheduled = YES;
+                        // Call original so Unity initializes its internal state
+                        ((void(*)(id,SEL,UIViewController*,NSString*,id))origShow)(self, showSel, vc, placementId, delegate);
+                        // Fallback: if webview hook never fires, complete after 2s
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                             dispatch_get_main_queue(), ^{
-                            if (gLastShowDelegate) FireComplete();
+                            if (gFireScheduled) FireComplete();
                         });
                     }
                 ));
@@ -149,13 +156,16 @@ static void ToSAdBypassInit(void) {
             SEL showOptSel = NSSelectorFromString(@"show:placementId:options:showDelegate:");
             Method sm2 = class_getClassMethod(UAClass, showOptSel);
             if (sm2) {
+                IMP origShow2 = method_getImplementation(sm2);
                 method_setImplementation(sm2, imp_implementationWithBlock(
                     ^(id self, UIViewController *vc, NSString *placementId, id options, id<UnityAdsShowDelegate> delegate) {
                         gLastShowDelegate = delegate;
                         gLastPlacementId = placementId;
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                        gFireScheduled = YES;
+                        ((void(*)(id,SEL,UIViewController*,NSString*,id,id))origShow2)(self, showOptSel, vc, placementId, options, delegate);
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                             dispatch_get_main_queue(), ^{
-                            if (gLastShowDelegate) FireComplete();
+                            if (gFireScheduled) FireComplete();
                         });
                     }
                 ));
@@ -173,12 +183,26 @@ static void ToSAdBypassInit(void) {
                     }
                 ));
             }
+
+            SEL loadOptSel = NSSelectorFromString(@"load:options:loadDelegate:");
+            Method lm2 = class_getClassMethod(UAClass, loadOptSel);
+            if (lm2) {
+                method_setImplementation(lm2, imp_implementationWithBlock(
+                    ^(id self, NSString *placementId, id options, id<UnityAdsLoadDelegate> loadDelegate) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            if ([loadDelegate respondsToSelector:@selector(unityAdsAdLoaded:)])
+                                [loadDelegate unityAdsAdLoaded:placementId];
+                        });
+                    }
+                ));
+            }
+
         } else if (attempts < 60) {
             attempts++;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                 dispatch_get_main_queue(), tryHookStrong);
         }
     };
-    tryHook = tryHookStrong;
+
     dispatch_async(dispatch_get_main_queue(), tryHookStrong);
 }
