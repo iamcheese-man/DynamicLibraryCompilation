@@ -27,7 +27,12 @@ typedef NS_ENUM(NSInteger, UnityAdsFinishState) {
 - (void)adDidDismissFullScreenContent:(id)ad;
 @end
 
-// Track the last show delegate and placement so we can fire complete
+typedef id (*LoadRequestIMP)(id, SEL, NSURLRequest *);
+typedef void (*PresentVCIMP)(id, SEL, UIViewController *, BOOL, void(^)(void));
+
+static LoadRequestIMP orig_loadRequest = NULL;
+static PresentVCIMP orig_presentVC = NULL;
+
 static id gLastShowDelegate = nil;
 static NSString *gLastPlacementId = nil;
 
@@ -35,8 +40,10 @@ static void FireComplete(void) {
     id delegate = gLastShowDelegate;
     NSString *placement = gLastPlacementId;
     if (!delegate || !placement) return;
+    gLastShowDelegate = nil;
+    gLastPlacementId = nil;
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_async(dispatch_get_main_queue(), ^{
         if ([delegate respondsToSelector:@selector(unityAdsShowStart:)])
             ((void(*)(id,SEL,NSString*))objc_msgSend)(delegate, @selector(unityAdsShowStart:), placement);
 
@@ -44,30 +51,22 @@ static void FireComplete(void) {
             if ([delegate respondsToSelector:@selector(unityAdsShowComplete:withFinish:)])
                 ((void(*)(id,SEL,NSString*,NSInteger))objc_msgSend)(delegate,
                     @selector(unityAdsShowComplete:withFinish:), placement, 2);
-            gLastShowDelegate = nil;
-            gLastPlacementId = nil;
         });
     });
 }
 
-static IMP orig_loadRequest = NULL;
-
-// Hook WKWebView loadRequest to intercept Unity Ads webview navigation
-static id hooked_loadRequest(WKWebView *self, SEL _cmd, NSURLRequest *request) {
+static id hooked_loadRequest(id self, SEL _cmd, NSURLRequest *request) {
     NSString *host = request.URL.host;
-    if ([host containsString:@"unity3d.com"] ||
-        [host containsString:@"unityads.unity3d.com"] ||
-        [host containsString:@"webview.unity3d.com"] ||
-        [host containsString:@"auction.unityads.unity3d.com"] ||
+    if (host && (
+        [host containsString:@"unity3d.com"] ||
         [host containsString:@"googlesyndication.com"] ||
-        [host containsString:@"doubleclick.net"]) {
+        [host containsString:@"doubleclick.net"] ||
+        [host containsString:@"googleadservices.com"])) {
 
-        // Block the webview from loading, fire reward immediately
         FireComplete();
 
-        // Also fire GAD reward if this webview belongs to a GAD ad
-        // Walk up the responder chain to find the ad VC
-        UIResponder *responder = self;
+        // Walk responder chain for GAD reward handler
+        UIResponder *responder = (UIResponder *)self;
         while (responder) {
             NSString *cn = NSStringFromClass([responder class]);
             if ([cn containsString:@"GAD"] || [cn containsString:@"GMA"]) {
@@ -87,15 +86,13 @@ static id hooked_loadRequest(WKWebView *self, SEL _cmd, NSURLRequest *request) {
             responder = [responder nextResponder];
         }
 
-        return nil; // Block load
+        return nil;
     }
 
     return orig_loadRequest(self, _cmd, request);
 }
 
-static IMP orig_presentVC = NULL;
-
-static void hooked_presentVC(UIViewController *self, SEL _cmd, UIViewController *vc, BOOL animated, void(^completion)(void)) {
+static void hooked_presentVC(id self, SEL _cmd, UIViewController *vc, BOOL animated, void(^completion)(void)) {
     NSString *cn = NSStringFromClass([vc class]);
     if ([cn containsString:@"UnityAds"] ||
         [cn containsString:@"UADS"] ||
@@ -110,26 +107,27 @@ static void hooked_presentVC(UIViewController *self, SEL _cmd, UIViewController 
 
 __attribute__((constructor))
 static void ToSAdBypassInit(void) {
-    // Hook WKWebView -loadRequest:
+    // Hook WKWebView loadRequest — always available at constructor time
     Class wkClass = NSClassFromString(@"WKWebView");
     if (wkClass) {
         Method m = class_getInstanceMethod(wkClass, @selector(loadRequest:));
         if (m) {
-            orig_loadRequest = method_getImplementation(m);
+            orig_loadRequest = (LoadRequestIMP)method_getImplementation(m);
             method_setImplementation(m, (IMP)hooked_loadRequest);
         }
     }
 
-    // Hook UIViewController presentation as backup
+    // Hook UIViewController presentation
     Method pm = class_getInstanceMethod([UIViewController class],
         @selector(presentViewController:animated:completion:));
-    orig_presentVC = method_getImplementation(pm);
+    orig_presentVC = (PresentVCIMP)method_getImplementation(pm);
     method_setImplementation(pm, (IMP)hooked_presentVC);
 
-    // Hook Unity Ads show to capture delegate + placement before ad fires
+    // Retry hook for Unity Ads show — captures delegate+placement into globals
     __block int attempts = 0;
-    __block void (^tryHook)(void);
-    tryHook = ^{
+    __block __weak void (^tryHook)(void);
+    __block void (^tryHookStrong)(void);
+    tryHookStrong = ^{
         Class UAClass = NSClassFromString(@"UnityAds");
         if (UAClass) {
             SEL showSel = NSSelectorFromString(@"show:placementId:showDelegate:");
@@ -139,8 +137,7 @@ static void ToSAdBypassInit(void) {
                     ^(id self, UIViewController *vc, NSString *placementId, id<UnityAdsShowDelegate> delegate) {
                         gLastShowDelegate = delegate;
                         gLastPlacementId = placementId;
-                        // Don't call original — WKWebView hook will fire complete
-                        // If webview hook misses for any reason, fire after 1s
+                        // Fallback: fire complete after 1s if webview hook didn't catch it
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                             dispatch_get_main_queue(), ^{
                             if (gLastShowDelegate) FireComplete();
@@ -179,9 +176,9 @@ static void ToSAdBypassInit(void) {
         } else if (attempts < 60) {
             attempts++;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-                dispatch_get_main_queue(), tryHook);
+                dispatch_get_main_queue(), tryHookStrong);
         }
     };
-
-    dispatch_async(dispatch_get_main_queue(), tryHook);
+    tryHook = tryHookStrong;
+    dispatch_async(dispatch_get_main_queue(), tryHookStrong);
 }
