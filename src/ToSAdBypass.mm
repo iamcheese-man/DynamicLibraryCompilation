@@ -42,6 +42,8 @@ typedef NS_ENUM(NSInteger, UnityAdsShowError) {
 - (void)adDidDismissFullScreenContent:(id)ad;
 @end
 
+static BOOL hooksInstalled = NO;
+
 static void FireUnityAdsComplete(NSString *placementId, id<UnityAdsShowDelegate> delegate) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if ([delegate respondsToSelector:@selector(unityAdsShowStart:)]) {
@@ -56,9 +58,10 @@ static void FireUnityAdsComplete(NSString *placementId, id<UnityAdsShowDelegate>
     });
 }
 
-__attribute__((constructor))
-static void ToSAdBypassInit(void) {
-    NSLog(@"[ToSAdBypass] Initializing...");
+static void InstallHooks(void) {
+    if (hooksInstalled) return;
+
+    BOOL anyInstalled = NO;
 
     // 1. Unity Ads 4.x
     Class UAClass = NSClassFromString(@"UnityAds");
@@ -68,10 +71,11 @@ static void ToSAdBypassInit(void) {
         if (m1) {
             method_setImplementation(m1, imp_implementationWithBlock(
                 ^(id self, UIViewController *vc, NSString *placementId, id<UnityAdsShowDelegate> delegate) {
-                    NSLog(@"[ToSAdBypass] Hooked show:placementId:showDelegate: (%@)", placementId);
+                    NSLog(@"[ToSAdBypass] Intercepted show:placementId:showDelegate: (%@)", placementId);
                     FireUnityAdsComplete(placementId, delegate);
                 }
             ));
+            anyInstalled = YES;
         }
 
         SEL showOptSel = NSSelectorFromString(@"show:placementId:options:showDelegate:");
@@ -79,10 +83,11 @@ static void ToSAdBypassInit(void) {
         if (m2) {
             method_setImplementation(m2, imp_implementationWithBlock(
                 ^(id self, UIViewController *vc, NSString *placementId, id options, id<UnityAdsShowDelegate> delegate) {
-                    NSLog(@"[ToSAdBypass] Hooked show:placementId:options:showDelegate: (%@)", placementId);
+                    NSLog(@"[ToSAdBypass] Intercepted show:placementId:options:showDelegate: (%@)", placementId);
                     FireUnityAdsComplete(placementId, delegate);
                 }
             ));
+            anyInstalled = YES;
         }
 
         SEL loadSel = NSSelectorFromString(@"load:loadDelegate:");
@@ -90,7 +95,7 @@ static void ToSAdBypassInit(void) {
         if (m3) {
             method_setImplementation(m3, imp_implementationWithBlock(
                 ^(id self, NSString *placementId, id<UnityAdsLoadDelegate> loadDelegate) {
-                    NSLog(@"[ToSAdBypass] Hooked load:loadDelegate: (%@)", placementId);
+                    NSLog(@"[ToSAdBypass] Intercepted load:loadDelegate: (%@)", placementId);
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([loadDelegate respondsToSelector:@selector(unityAdsAdLoaded:)]) {
                             [loadDelegate unityAdsAdLoaded:placementId];
@@ -105,7 +110,7 @@ static void ToSAdBypassInit(void) {
         if (m4) {
             method_setImplementation(m4, imp_implementationWithBlock(
                 ^(id self, NSString *placementId, id options, id<UnityAdsLoadDelegate> loadDelegate) {
-                    NSLog(@"[ToSAdBypass] Hooked load:options:loadDelegate: (%@)", placementId);
+                    NSLog(@"[ToSAdBypass] Intercepted load:options:loadDelegate: (%@)", placementId);
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([loadDelegate respondsToSelector:@selector(unityAdsAdLoaded:)]) {
                             [loadDelegate unityAdsAdLoaded:placementId];
@@ -116,8 +121,6 @@ static void ToSAdBypassInit(void) {
         }
 
         NSLog(@"[ToSAdBypass] Unity Ads hooks installed");
-    } else {
-        NSLog(@"[ToSAdBypass] UnityAds class not found");
     }
 
     // 2. Google Mobile Ads
@@ -128,7 +131,7 @@ static void ToSAdBypassInit(void) {
         if (gm) {
             method_setImplementation(gm, imp_implementationWithBlock(
                 ^(id self, UIViewController *vc, dispatch_block_t rewardHandler) {
-                    NSLog(@"[ToSAdBypass] Hooked GADRewardedAd present");
+                    NSLog(@"[ToSAdBypass] Intercepted GADRewardedAd present");
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if (rewardHandler) {
                             rewardHandler();
@@ -145,10 +148,9 @@ static void ToSAdBypassInit(void) {
                     });
                 }
             ));
+            anyInstalled = YES;
         }
         NSLog(@"[ToSAdBypass] GAD hooks installed");
-    } else {
-        NSLog(@"[ToSAdBypass] GADRewardedAd class not found");
     }
 
     // 3. GMARewardedAdDelegateProxy
@@ -164,9 +166,38 @@ static void ToSAdBypassInit(void) {
                     ((void(*)(id,SEL,id,NSString*,BOOL))origOnComplete)(self, onCompleteSel, meta, network, YES);
                 }
             ));
+            anyInstalled = YES;
         }
         NSLog(@"[ToSAdBypass] GMA proxy hook installed");
     }
 
-    NSLog(@"[ToSAdBypass] Done.");
+    if (anyInstalled) {
+        hooksInstalled = YES;
+        NSLog(@"[ToSAdBypass] All hooks installed successfully");
+    }
+}
+
+__attribute__((constructor))
+static void ToSAdBypassInit(void) {
+    NSLog(@"[ToSAdBypass] Constructor fired, waiting for Unity to load...");
+
+    __block int attempts = 0;
+    __block void (^tryHook)(void);
+    tryHook = ^{
+        Class UAClass = NSClassFromString(@"UnityAds");
+        Class GADClass = NSClassFromString(@"GADRewardedAd");
+        if (UAClass && GADClass) {
+            InstallHooks();
+        } else if (attempts < 60) {
+            attempts++;
+            NSLog(@"[ToSAdBypass] Classes not ready yet, attempt %d...", attempts);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                dispatch_get_main_queue(), tryHook);
+        } else {
+            NSLog(@"[ToSAdBypass] Giving up after 60 attempts - UAClass=%d GADClass=%d",
+                UAClass != nil, GADClass != nil);
+        }
+    };
+
+    dispatch_async(dispatch_get_main_queue(), tryHook);
 }
