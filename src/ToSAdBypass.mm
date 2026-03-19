@@ -50,12 +50,28 @@ static void FireComplete(void) {
     });
 }
 
+static void DismissTopVC(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
+#pragma clang diagnostic pop
+        UIViewController *top = root;
+        while (top.presentedViewController) top = top.presentedViewController;
+        if (top != root) {
+            [top dismissViewControllerAnimated:NO completion:nil];
+        }
+    });
+}
+
 static BOOL IsAdHost(NSString *host) {
     if (!host) return NO;
     return [host containsString:@"unity3d.com"] ||
            [host containsString:@"googlesyndication.com"] ||
            [host containsString:@"doubleclick.net"] ||
-           [host containsString:@"googleadservices.com"];
+           [host containsString:@"googleadservices.com"] ||
+           [host containsString:@"unityads.unity3d.com"] ||
+           [host containsString:@"webview.unity3d.com"];
 }
 
 @interface ToSNavDelegate : NSObject <WKNavigationDelegate>
@@ -67,7 +83,8 @@ static BOOL IsAdHost(NSString *host) {
 - (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {
     if (IsAdHost(webView.URL.host)) {
         [webView stopLoading];
-        FireComplete();
+        if (gLastShowDelegate) FireComplete();
+        else DismissTopVC();
         return;
     }
     if ([self.original respondsToSelector:@selector(webView:didStartProvisionalNavigation:)])
@@ -77,7 +94,8 @@ static BOOL IsAdHost(NSString *host) {
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     if (IsAdHost(navigationAction.request.URL.host)) {
         decisionHandler(WKNavigationActionPolicyCancel);
-        FireComplete();
+        if (gLastShowDelegate) FireComplete();
+        else DismissTopVC();
         return;
     }
     if ([self.original respondsToSelector:@selector(webView:decidePolicyForNavigationAction:decisionHandler:)])
@@ -98,9 +116,7 @@ static BOOL IsAdHost(NSString *host) {
 @end
 
 static void hooked_setNavDelegate(WKWebView *self, SEL _cmd, id<WKNavigationDelegate> delegate) {
-    NSString *cn = NSStringFromClass([delegate class]);
-    if ([cn containsString:@"Unity"] || [cn containsString:@"GAD"] ||
-        [cn containsString:@"GMA"] || [cn containsString:@"UADS"]) {
+    if (delegate) {
         ToSNavDelegate *spy = [[ToSNavDelegate alloc] init];
         spy.original = delegate;
         [gNavDelegates addObject:spy];
@@ -117,7 +133,8 @@ static void hooked_presentVC(id self, SEL _cmd, UIViewController *vc, BOOL anima
         [cn containsString:@"GADFullScreen"] ||
         [cn containsString:@"GMAFullScreen"]) {
         if (completion) completion();
-        FireComplete();
+        if (gLastShowDelegate) FireComplete();
+        else DismissTopVC();
         return;
     }
     orig_presentVC(self, _cmd, vc, animated, completion);
