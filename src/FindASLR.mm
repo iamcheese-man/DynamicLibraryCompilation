@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #include <mach/mach.h>
+#include <mach-o/dyld.h>
 #include <dlfcn.h>
 
 static void showAlert(NSString *msg) {
