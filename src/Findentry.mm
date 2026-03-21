@@ -1,7 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #include <mach-o/dyld.h>
-#include <mach-o/mach.h>
+#include <mach/mach.h>
 #include <dlfcn.h>
 #include <string.h>
 
