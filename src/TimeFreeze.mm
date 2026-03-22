@@ -1,7 +1,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-static time_t FROZEN_TIME = 1774108080;
+static time_t FROZEN_TIME = 1774147680;
 
 static int my_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (tv) {
