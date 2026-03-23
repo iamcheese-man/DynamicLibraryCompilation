@@ -60,20 +60,22 @@ jobs:
           M_FILES=$(find . \( -name "*.m" -o -name "*.mm" \) -type f)
           C_FILES=$(find . -name "*.c" -type f)
           clang++ -dynamiclib -fobjc-arc -o liboutput.dylib \
-            $M_FILES $C_FILES \
-            -arch arm64 \
-            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
-            -mios-version-min=14.0 \
-            -std=c++17 \
-            -framework Foundation \
-            -framework UIKit \
-            -framework AVFoundation \
-            -framework CoreGraphics \
-            -framework QuartzCore \
-            -framework Security \
-            -lobjc
-          mkdir -p ../build
-          mv liboutput.dylib ../build/
+          $M_FILES $C_FILES \
+          -arch arm64 -arch arm64e \
+          -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+          -mios-version-min=14.0 \
+          -std=c++17 \
+          -framework Foundation \
+          -framework UIKit \
+          -framework AVFoundation \
+          -framework CoreGraphics \
+          -framework QuartzCore \
+          -framework Security \
+          -lobjc \
+          -install_name @rpath/liboutput.dylib \
+          -Wl,-dead_strip
+                mkdir -p ../build
+                mv liboutput.dylib ../build/
 
       - name: Install ldid
         if: inputs.project_type == 'swift-dylib' || inputs.project_type == 'objc-dylib'
