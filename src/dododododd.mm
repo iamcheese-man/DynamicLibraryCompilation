@@ -31,7 +31,8 @@ static void init() {
         NSLog(@"[MProvDump] Method not found");
         return;
     }
-    orig_fetchProfile = (void *)method_getImplementation(m);
+    orig_fetchProfile = (void (*)(id, SEL, id, void (^)(id, NSError *)))method_getImplementation(m);
+
     method_setImplementation(m, (IMP)hook_fetchProfile);
     NSLog(@"[MProvDump] Hooked successfully");
 }
