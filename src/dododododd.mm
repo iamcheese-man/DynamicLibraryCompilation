@@ -1,23 +1,37 @@
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
-%hook ALTServerManager
+static void (*orig_fetchProfile)(id self, SEL _cmd, id app, void (^completion)(id, NSError *));
 
-- (void)fetchProvisioningProfileForApp:(id)app
-                            completion:(void (^)(id, NSError *))completion {
-    %orig(app, ^(id profile, NSError *error) {
+static void hook_fetchProfile(id self, SEL _cmd, id app, void (^completion)(id, NSError *)) {
+    orig_fetchProfile(self, _cmd, app, ^(id profile, NSError *error) {
         if (profile) {
             NSData *profileData = [profile valueForKey:@"data"];
             if (profileData) {
-                NSString *docsPath = NSSearchPathForDirectoriesInDomains(
+                NSString *docs = NSSearchPathForDirectoriesInDomains(
                     NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-                NSString *outPath = [docsPath stringByAppendingPathComponent:@"embedded.mobileprovision"];
-                [profileData writeToFile:outPath atomically:YES];
-                NSLog(@"[MProvDump] Saved mobileprovision to %@", outPath);
+                NSString *out = [docs stringByAppendingPathComponent:@"embedded.mobileprovision"];
+                [profileData writeToFile:out atomically:YES];
+                NSLog(@"[MProvDump] Saved to %@", out);
             }
         }
         completion(profile, error);
     });
 }
 
-%end
+__attribute__((constructor))
+static void init() {
+    Class cls = NSClassFromString(@"ALTServerManager");
+    if (!cls) {
+        NSLog(@"[MProvDump] ALTServerManager not found");
+        return;
+    }
+    Method m = class_getInstanceMethod(cls, @selector(fetchProvisioningProfileForApp:completion:));
+    if (!m) {
+        NSLog(@"[MProvDump] Method not found");
+        return;
+    }
+    orig_fetchProfile = (void *)method_getImplementation(m);
+    method_setImplementation(m, (IMP)hook_fetchProfile);
+    NSLog(@"[MProvDump] Hooked successfully");
+}
