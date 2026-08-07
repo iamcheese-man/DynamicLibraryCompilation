@@ -273,7 +273,7 @@ static AudioHUDButton *sSharedButton = nil;
 
 #pragma mark - Constructor entry point
 
-// Runs automatically as soon as the dylib is loaded into the host process â
+// Runs automatically as soon as the dylib is loaded into the host process —
 // no swizzling or Theos/Logos hooks required. We just wait for a key window
 // to appear and attach the floating HUD button to it.
 __attribute__((constructor))
