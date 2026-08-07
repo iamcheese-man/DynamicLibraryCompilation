@@ -2,19 +2,19 @@
 
 Compile dynamic libraries, tweaks, and frameworks for iOS **without a Mac** using GitHub Actions!
 
-## 🚀 Features
+## Features
 
-- ✅ Compile Swift dylibs
-- ✅ Compile Objective-C dylibs  
-- ✅ Compile Theos tweaks
-- ✅ Build iOS frameworks
-- ✅ Output as `.dylib` or `.deb` package
-- ✅ No Mac required!
+- Compile Swift dylibs
+- Compile Objective-C dylibs  
+- Compile Theos tweaks
+- Build iOS frameworks
+- Output as `.dylib` or `.deb` package
+- No Mac required.
 
-## 📁 Project Structure
+## Project Structure
 
 ```
-your-repo/
+Repo/
 ├── .github/
 │   └── workflows/
 │       └── compile.yml
@@ -23,7 +23,7 @@ your-repo/
 └── README.md
 ```
 
-## 🔨 How to Use
+## How to Use
 
 ### 1. Fork/Use This Template
 
@@ -72,7 +72,7 @@ Once the workflow completes:
 - Scroll to **Artifacts**
 - Download your compiled `.dylib` or `.deb`
 
-## 📝 Examples
+## Examples
 
 ### Swift Dylib Example
 
