@@ -7,75 +7,23 @@ static NSArray<NSString *> *AudioExtensions(void) {
     return @[@"mp3", @"m4a", @"wav", @"aac", @"flac", @"aiff", @"aif", @"caf", @"alac"];
 }
 
-// Walks a parent directory one level down looking for a child folder
-// literally named "LCShared" (e.g. /var/mobile/Containers/Data/Application/
-// contains one folder per app UUID; we peek into each one's Documents dir).
-static NSString * _Nullable FindLCSharedUnder(NSString *parentDir, NSArray<NSString *> *subpathComponents) {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSError *error = nil;
-    NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:parentDir error:&error];
-    if (!entries) {
-        return nil; // typically a sandbox permission error — expected on most setups
-    }
-
-    for (NSString *entry in entries) {
-        NSString *candidate = [parentDir stringByAppendingPathComponent:entry];
-        for (NSString *component in subpathComponents) {
-            candidate = [candidate stringByAppendingPathComponent:component];
-        }
-        candidate = [candidate stringByAppendingPathComponent:@"LCShared"];
-
-        BOOL isDir = NO;
-        if ([fm fileExistsAtPath:candidate isDirectory:&isDir] && isDir) {
-            return candidate;
-        }
-    }
-    return nil;
-}
-
 @implementation AudioFileScanner
 
 + (nullable NSString *)resolvedLCSharedPath {
-    NSFileManager *fm = [NSFileManager defaultManager];
-
-    // 1. Inside this guest app's own sandboxed Documents folder.
-    NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    if (docs) {
-        NSString *candidate = [docs stringByAppendingPathComponent:@"LCShared"];
-        BOOL isDir = NO;
-        if ([fm fileExistsAtPath:candidate isDirectory:&isDir] && isDir) {
-            NSLog(@"[AudioHUD] Using LCShared path: %@", candidate);
-            return candidate;
-        }
+    const char *envPath = getenv("LC_SHARED_FOLDER");
+    if (!envPath) {
+        NSLog(@"[AudioHUD] LC_SHARED_FOLDER env var not set.");
+        return nil;
     }
 
-    // 2. Auto-discover: LiveContainer's own container exposes LCShared via
-    // "On My iPhone > LiveContainer > LCShared" in the Files app, which
-    // means it physically lives inside LiveContainer's *own* app container
-    // (Documents/LCShared), a sibling of the guest app's container — not
-    // inside it. We can't know LiveContainer's UUID from in here, so we
-    // scan for it. This only succeeds if the process actually has read
-    // access outside its own sandbox (common on LiveContainer/TrollStore
-    // style installs without a full App Sandbox entitlement — if your
-    // guest app is properly sandboxed this loop will simply find nothing).
-    NSString *foundInAppData =
-        FindLCSharedUnder(@"/var/mobile/Containers/Data/Application", @[@"Documents"]);
-    if (foundInAppData) {
-        NSLog(@"[AudioHUD] Auto-discovered LCShared at: %@", foundInAppData);
-        return foundInAppData;
+    NSString *path = [NSString stringWithUTF8String:envPath];
+    BOOL isDir = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] && isDir) {
+        NSLog(@"[AudioHUD] Using LCShared path from LC_SHARED_FOLDER: %@", path);
+        return path;
     }
 
-    NSString *foundInAppGroup =
-        FindLCSharedUnder(@"/var/mobile/Containers/Shared/AppGroup", @[]);
-    if (foundInAppGroup) {
-        NSLog(@"[AudioHUD] Auto-discovered LCShared at: %@", foundInAppGroup);
-        return foundInAppGroup;
-    }
-
-    NSLog(@"[AudioHUD] Could not locate LCShared automatically. "
-          @"Your guest app's sandbox is likely blocking reads outside its own "
-          @"container. Open Filza/Files, get LCShared's exact path, and hardcode "
-          @"it as a new candidate at the top of this method.");
+    NSLog(@"[AudioHUD] LC_SHARED_FOLDER (%@) does not exist or isn't a directory.", path);
     return nil;
 }
 
@@ -325,7 +273,7 @@ static AudioHUDButton *sSharedButton = nil;
 
 #pragma mark - Constructor entry point
 
-// Runs automatically as soon as the dylib is loaded into the host process —
+// Runs automatically as soon as the dylib is loaded into the host process â
 // no swizzling or Theos/Logos hooks required. We just wait for a key window
 // to appear and attach the floating HUD button to it.
 __attribute__((constructor))
