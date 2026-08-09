@@ -28,10 +28,12 @@
 // combining UIButton + UIPanGestureRecognizer (which can eat taps).
 //
 
-@class HUDPlayerManager;
+@protocol HUDViewTapHandler <NSObject>
+- (void)hudTapped;
+@end
 
 @interface HUDView : UIView
-@property (nonatomic, weak) HUDPlayerManager *manager;
+@property (nonatomic, weak) id<HUDViewTapHandler> manager;
 @property (nonatomic, assign) BOOL didDrag;
 @end
 
@@ -82,7 +84,7 @@
 
 #pragma mark - HUDPlayerManager
 
-@interface HUDPlayerManager : NSObject <UIDocumentPickerDelegate>
+@interface HUDPlayerManager : NSObject <UIDocumentPickerDelegate, HUDViewTapHandler>
 
 @property (nonatomic, strong) UIWindow *hudWindow;
 @property (nonatomic, strong) HUDView *hudView;
