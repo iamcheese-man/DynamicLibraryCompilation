@@ -290,7 +290,7 @@
 #pragma mark File picker (new — play any audio file you choose)
 
 - (void)presentFilePicker {
-    NSArray<UTType *> *types = @[UTTypeAudio];
+    NSArray<UTType *> *types = @[[UTType typeWithIdentifier:@"public.audio"]];
     UIDocumentPickerViewController *picker =
         [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types];
     picker.delegate = self;
