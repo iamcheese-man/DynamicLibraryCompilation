@@ -20,7 +20,6 @@
 
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
-#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #pragma mark - HUDView
 //
@@ -290,9 +289,11 @@
 #pragma mark File picker (new — play any audio file you choose)
 
 - (void)presentFilePicker {
-    NSArray<UTType *> *types = @[[UTType typeWithIdentifier:@"public.audio"]];
+    // "public.audio" is a system UTI string — no UniformTypeIdentifiers
+    // framework import/link required for this initializer.
     UIDocumentPickerViewController *picker =
-        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types];
+        [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.audio"]
+                                                                 inMode:UIDocumentPickerModeImport];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
     [self.hudWindow.rootViewController presentViewController:picker animated:YES completion:nil];
