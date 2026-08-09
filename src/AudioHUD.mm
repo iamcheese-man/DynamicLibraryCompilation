@@ -21,6 +21,27 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 
+#pragma mark - PassThroughView
+//
+// Lets touches on empty space fall through to the app underneath,
+// while touches on actual subviews (the HUD button) are still handled.
+//
+
+@interface PassThroughView : UIView
+@end
+
+@implementation PassThroughView
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hit = [super hitTest:point withEvent:event];
+    if (hit == self) {
+        return nil; // tapped empty background — let it pass through
+    }
+    return hit;
+}
+
+@end
+
 #pragma mark - HUDView
 //
 // Handles its own drag-vs-tap logic with raw touch events instead of
@@ -44,8 +65,8 @@
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
-    CGPoint prev = [touch previousLocationInView:self];
-    CGPoint cur  = [touch locationInView:self];
+    CGPoint prev = [touch previousLocationInView:self.superview];
+    CGPoint cur  = [touch locationInView:self.superview];
     CGFloat dx = cur.x - prev.x;
     CGFloat dy = cur.y - prev.y;
 
@@ -53,19 +74,19 @@
         self.didDrag = YES;
     }
 
-    UIWindow *window = self.window;
-    if (!window) return;
+    UIView *container = self.superview;
+    if (!container) return;
 
-    CGRect frame = window.frame;
+    CGRect frame = self.frame;
     frame.origin.x += dx;
     frame.origin.y += dy;
 
-    // Keep it roughly on-screen.
-    CGRect screenBounds = window.screen.bounds;
-    frame.origin.x = MAX(-frame.size.width * 0.5, MIN(frame.origin.x, screenBounds.size.width - frame.size.width * 0.5));
-    frame.origin.y = MAX(0, MIN(frame.origin.y, screenBounds.size.height - frame.size.height));
+    // Keep it fully on-screen.
+    CGRect bounds = container.bounds;
+    frame.origin.x = MAX(0, MIN(frame.origin.x, bounds.size.width - frame.size.width));
+    frame.origin.y = MAX(0, MIN(frame.origin.y, bounds.size.height - frame.size.height));
 
-    window.frame = frame;
+    self.frame = frame;
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
@@ -149,14 +170,21 @@
 
 - (void)createHUDInScene:(UIWindowScene *)scene {
     const CGFloat size = 56.0;
+    CGRect screenBounds = scene.screen.bounds;
 
+    // Full-screen overlay window so anything we present (alerts, pickers)
+    // isn't clipped to a tiny frame. Empty areas pass touches through.
     self.hudWindow = [[UIWindow alloc] initWithWindowScene:scene];
-    self.hudWindow.frame = CGRectMake(20, 120, size, size);
+    self.hudWindow.frame = screenBounds;
     self.hudWindow.windowLevel = UIWindowLevelAlert + 1;
     self.hudWindow.backgroundColor = [UIColor clearColor];
     self.hudWindow.hidden = NO;
 
-    self.hudView = [[HUDView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
+    PassThroughView *rootView = [[PassThroughView alloc] initWithFrame:screenBounds];
+    rootView.backgroundColor = [UIColor clearColor];
+    rootView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+    self.hudView = [[HUDView alloc] initWithFrame:CGRectMake(20, 120, size, size)];
     self.hudView.manager = self;
     self.hudView.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.85];
     self.hudView.layer.cornerRadius = size / 2.0;
@@ -173,9 +201,10 @@
     icon.userInteractionEnabled = NO;
     [self.hudView addSubview:icon];
 
+    [rootView addSubview:self.hudView];
+
     UIViewController *rootVC = [[UIViewController alloc] init];
-    rootVC.view.backgroundColor = [UIColor clearColor];
-    [rootVC.view addSubview:self.hudView];
+    rootVC.view = rootView;
     self.hudWindow.rootViewController = rootVC;
 }
 
