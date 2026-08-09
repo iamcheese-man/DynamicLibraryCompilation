@@ -95,7 +95,7 @@ jobs:
         run: |
           export THEOS=~/theos
           cd src
-          make package
+          make
           mkdir -p ../build
           find .theos/obj -name "*.dylib" | head -1 | xargs -I{} cp {} ../build/liboutput.dylib 2>/dev/null || true
           cp packages/*.deb ../build/ 2>/dev/null || true
