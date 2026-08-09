@@ -21,23 +21,27 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 
-#pragma mark - PassThroughView
+#pragma mark - PassThroughWindow
 //
-// Lets touches on empty space fall through to the app underneath,
-// while touches on actual subviews (the HUD button) are still handled.
+// A plain UIView returning nil from hitTest still causes its *window*
+// to claim the touch (UIView's default hitTest falls back to "self"
+// when no subview matches). So the pass-through has to happen at the
+// window level: if the touch didn't land on our HUD button, return nil
+// from the window's hitTest so the event falls through to the app
+// window underneath.
 //
 
-@interface PassThroughView : UIView
+@interface PassThroughWindow : UIWindow
 @end
 
-@implementation PassThroughView
+@implementation PassThroughWindow
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *hit = [super hitTest:point withEvent:event];
-    if (hit == self) {
+    UIView *hitView = [super hitTest:point withEvent:event];
+    if (hitView == self.rootViewController.view) {
         return nil; // tapped empty background — let it pass through
     }
-    return hit;
+    return hitView;
 }
 
 @end
@@ -106,7 +110,7 @@
 
 @interface HUDPlayerManager : NSObject <UIDocumentPickerDelegate, HUDViewTapHandler>
 
-@property (nonatomic, strong) UIWindow *hudWindow;
+@property (nonatomic, strong) PassThroughWindow *hudWindow;
 @property (nonatomic, strong) HUDView *hudView;
 @property (nonatomic, strong) AVAudioPlayer *audioPlayer;
 @property (nonatomic, copy)   NSString *tweaksFolder;
@@ -173,13 +177,13 @@
 
     // Full-screen overlay window so anything we present (alerts, pickers)
     // isn't clipped to a tiny frame. Empty areas pass touches through.
-    self.hudWindow = [[UIWindow alloc] initWithWindowScene:scene];
+    self.hudWindow = [[PassThroughWindow alloc] initWithWindowScene:scene];
     self.hudWindow.frame = screenBounds;
     self.hudWindow.windowLevel = UIWindowLevelAlert + 1;
     self.hudWindow.backgroundColor = [UIColor clearColor];
     self.hudWindow.hidden = NO;
 
-    PassThroughView *rootView = [[PassThroughView alloc] initWithFrame:screenBounds];
+    UIView *rootView = [[UIView alloc] initWithFrame:screenBounds];
     rootView.backgroundColor = [UIColor clearColor];
     rootView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
