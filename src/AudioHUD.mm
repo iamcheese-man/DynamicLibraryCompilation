@@ -110,7 +110,6 @@
 @property (nonatomic, strong) HUDView *hudView;
 @property (nonatomic, strong) AVAudioPlayer *audioPlayer;
 @property (nonatomic, copy)   NSString *tweaksFolder;
-@property (nonatomic, strong) NSURL *securityScopedURL; // currently-open picked file, if any
 
 + (instancetype)sharedManager;
 - (void)setup;
@@ -332,7 +331,9 @@
 didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = urls.firstObject;
     if (!url) return;
-    [self playLocalFileAtURL:url isSecurityScoped:YES];
+    // Import mode already copied the file into our sandbox — it's a
+    // plain local URL now, no security-scoped access needed.
+    [self playLocalFileAtURL:url];
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
@@ -342,21 +343,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
 #pragma mark Playback
 
 - (void)playLocalFileAtURL:(NSURL *)url {
-    [self playLocalFileAtURL:url isSecurityScoped:NO];
-}
-
-- (void)playLocalFileAtURL:(NSURL *)url isSecurityScoped:(BOOL)isSecurityScoped {
     [self stopPlayback];
-
-    if (isSecurityScoped) {
-        if (![url startAccessingSecurityScopedResource]) {
-            [self presentAlertTitle:@"Access Denied"
-                             message:@"Couldn't get permission to read that file."
-                                from:self.hudWindow.rootViewController];
-            return;
-        }
-        self.securityScopedURL = url;
-    }
 
     NSError *sessionError = nil;
     AVAudioSession *session = [AVAudioSession sharedInstance];
@@ -381,11 +368,6 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
 - (void)stopPlayback {
     [self.audioPlayer stop];
     self.audioPlayer = nil;
-
-    if (self.securityScopedURL) {
-        [self.securityScopedURL stopAccessingSecurityScopedResource];
-        self.securityScopedURL = nil;
-    }
 }
 
 #pragma mark Alerts
